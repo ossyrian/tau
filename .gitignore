@@ -1,0 +1,4 @@
+.env
+workspace/
+pi-config/
+workspaces.conf

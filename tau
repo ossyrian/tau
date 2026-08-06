@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+# tau — CLI for the Pi Coding Agent sandbox container.
+#
+#   tau start | stop | restart | shell | env | refresh
+#   tau session new [--name NAME] | list | kill <id> | attach <id>
+#
+# Credential model: the container reads AWS creds from a file on a container-only
+# tmpfs (AWS_SHARED_CREDENTIALS_FILE, set in the image). The host resolves fresh
+# readonly-scoped temp creds and pipes them in — never onto host disk. `refresh`
+# rewrites that file, so a long-lived container survives cred expiry without
+# losing running Pi sessions.
+set -euo pipefail
+
+# Resolve SELF through symlinks so `tau` works when symlinked onto PATH.
+__src="${BASH_SOURCE[0]}"
+while [[ -h "$__src" ]]; do
+  __dir="$(cd -P "$(dirname "$__src")" && pwd)"
+  __src="$(readlink "$__src")"
+  [[ "$__src" != /* ]] && __src="$__dir/$__src"
+done
+SELF="$(cd -P "$(dirname "$__src")" && pwd)"
+CONTAINER="tau"
+IMAGE="tau:latest"
+PROFILE="${PI_AWS_PROFILE:-}"
+SCRIPTS="${PI_SCRIPTS:-$SELF/scripts}"
+WORKSPACE="${PI_WORKSPACE:-$SELF/workspace}"
+PI_CONFIG="${PI_CONFIG:-$SELF/pi-config}"    # host mount for Pi's global ~/.pi
+SKILLS_CONF="${PI_SKILLS_CONF:-$SELF/skills.conf}"   # host skill dirs to mount
+WORKSPACES_FILE="${PI_WORKSPACES_FILE:-$SELF/workspaces.conf}"   # registry: <uuid>\t<path>
+REGION="${AWS_REGION:-us-east-1}"
+PI_CMD="${PI_CMD:-pi}"                       # command that starts a Pi conversation
+CRED_DIR="/home/pi/.tau"
+CRED_FILE="$CRED_DIR/credentials"
+TMUX=(tmux -L tau -f /etc/tau/tmux.conf)     # dedicated socket + minimal config
+
+usage() {
+  cat <<'EOF'
+tau — sandbox CLI for the Pi Coding Agent container.
+
+Usage: tau <command> [args]
+
+Container:
+  start              run the container (or resume if stopped), push fresh creds
+  stop               stop the container (running sessions are lost)
+  restart            restart if running, else noop (running sessions are lost)
+  shell              open an interactive zsh in the container
+  refresh            re-push fresh temp creds without a restart
+  env                edit the scoped-token .env file in $EDITOR
+  config             edit Pi's global settings.json in $EDITOR
+  skills [list]      edit skills.conf (host dirs mounted into Pi), or list resolved mounts
+
+Workspaces (rsync'd into the live-mounted workspace/ — instant, no restart):
+  workspace add [dir] [--name NAME] [--cd]  rsync dir (default PWD) into /workspace/<name>
+                              --name sets the name (default: dir basename)
+  workspace list              list workspaces: name, id, container path, source
+  workspace remove <name|id>  delete the copy (source untouched); by name or id prefix
+  workspace cd <name|id>      cd into the copy (needs the tau.fish wrapper)
+
+Sessions (container must be running):
+  session new [--name NAME]   start a Pi conversation and attach (--name, else random)
+  session list                list sessions: name, type, created, last active
+  session kill <name>         kill a session by name (or unique prefix)
+  session attach <name>       reattach a session by name (or unique prefix)
+
+Detach from a session with Ctrl-b d — Pi keeps running.
+
+Env:
+  PI_AWS_PROFILE   (required for start/refresh/session/shell) readonly-scoped AWS profile
+  PI_CMD           command that starts a Pi conversation (default: pi)
+  AWS_REGION       default: us-east-1
+  PI_SCRIPTS / PI_WORKSPACE / PI_CONFIG   host dirs bind-mounted into the container
+                   (scripts, /workspace, ~/.pi)
+  PI_SKILLS_CONF   path to skills.conf (default: alongside this script)
+  EDITOR           used by `tau env` / `tau config` / `tau skills`
+EOF
+}
+
+die()  { echo "tau: $*" >&2; exit 1; }
+exists()  { docker container inspect "$CONTAINER" &>/dev/null; }
+running() { [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" == true ]]; }
+need_running() { running || die "container not running — 'tau start' first"; }
+
+# docker exec wrappers.
+dexec()  { docker exec "$CONTAINER" "$@"; }              # non-interactive
+dexeci() { docker exec -it "$CONTAINER" "$@"; }          # interactive (tty)
+tx()     { dexec "${TMUX[@]}" "$@"; }                    # tmux, non-interactive
+
+# Resolve fresh temp creds on the host and pipe them into the container tmpfs.
+refresh_creds() {
+  [[ -n "$PROFILE" ]] || die "set PI_AWS_PROFILE to your readonly-scoped profile"
+  local creds
+  if ! creds="$(aws configure export-credentials --profile "$PROFILE" --format env 2>/dev/null)"; then
+    echo "tau: could not export creds for profile '$PROFILE'." >&2
+    die "if it's SSO, log in first:  aws sso login --profile $PROFILE"
+  fi
+  eval "$creds"   # sets AWS_ACCESS_KEY_ID / _SECRET_ACCESS_KEY / _SESSION_TOKEN
+  printf '[default]\naws_access_key_id=%s\naws_secret_access_key=%s\naws_session_token=%s\n' \
+    "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" "$AWS_SESSION_TOKEN" \
+    | docker exec -i "$CONTAINER" sh -c "umask 077; cat > '$CRED_FILE'"
+}
+
+# tmpfs mounts root-owned; hand it to pi so the cred file can be written.
+init_container() {
+  docker exec -u 0 "$CONTAINER" chown 1000:1000 "$CRED_DIR"
+  refresh_creds
+}
+
+# Read skills.conf into a docker -v arg list. Each host dir mounts read-write
+# at /home/pi/.pi/agent/skills/<basename> (nested under the pi-config mount) so
+# Pi can edit its own skills. Edits write back to the host source path.
+# New skills Pi creates land in pi-config/agent/skills (tau-owned, not a source).
+# Sets the global array `skill_mounts`.
+build_skill_mounts() {
+  skill_mounts=()
+  [[ -f "$SKILLS_CONF" ]] || return 0
+  local line
+  while IFS= read -r line; do
+    line="${line%%#*}"
+    line="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    [[ -z "$line" ]] && continue
+    line="${line/#\~/$HOME}"
+    if [[ ! -d "$line" ]]; then
+      echo "tau: skill path not found, skipping: $line" >&2
+      continue
+    fi
+    skill_mounts+=(-v "$line:/home/pi/.pi/agent/skills/$(basename "$line")")
+  done < "$SKILLS_CONF"
+}
+
+# The tmux session_name IS the name (no uuids). Resolve an exact name, else a
+# unique prefix. Echoes the matched session_name.
+resolve_session() {
+  local q="$1" names match
+  names="$(tx list-sessions -F '#{session_name}' 2>/dev/null || true)"
+  [[ -n "$names" ]] || die "no active sessions"
+  if grep -qx -- "$q" <<<"$names"; then echo "$q"; return; fi          # exact
+  match="$(grep -- "^$q" <<<"$names" || true)"                          # prefix
+  [[ -n "$match" ]] || die "no session matching '$q'"
+  [[ "$(wc -l <<<"$match")" -eq 1 ]] || die "ambiguous '$q' — matches multiple sessions"
+  echo "$match"
+}
+
+# Always a fresh `docker run` — `docker start`/`restart` reuse the old config and
+# would NOT pick up .env, -e, or mount changes. A stopped container has no live
+# sessions or creds, so recreating loses nothing.
+create_container() {
+  exists && docker rm -f "$CONTAINER" >/dev/null
+  local env_file_args=()
+  [[ -f "$SELF/.env" ]] && env_file_args+=(--env-file "$SELF/.env")
+  mkdir -p "$SCRIPTS" "$WORKSPACE" "$PI_CONFIG/agent/skills"
+  local skill_mounts; build_skill_mounts
+  docker run -d --name "$CONTAINER" \
+    --tmpfs "$CRED_DIR:mode=0700" \
+    -e AWS_REGION="$REGION" \
+    "${env_file_args[@]+"${env_file_args[@]}"}" \
+    -v "$WORKSPACE":/workspace \
+    -v "$SCRIPTS":/home/pi/scripts \
+    -v "$PI_CONFIG":/home/pi/.pi \
+    "${skill_mounts[@]+"${skill_mounts[@]}"}" \
+    "$IMAGE" >/dev/null
+  init_container
+}
+
+cmd_start() {
+  running && { echo "already running"; return; }
+  create_container
+  echo "started"
+}
+
+cmd_stop() {
+  exists || { echo "not running"; return; }
+  docker rm -f "$CONTAINER" >/dev/null
+  echo "stopped (sessions lost)"
+}
+
+cmd_restart() {
+  running || { echo "not running — noop"; return; }
+  create_container
+  echo "restarted (previous sessions were lost)"
+}
+
+cmd_shell() { need_running; refresh_creds; exec docker exec -it "$CONTAINER" zsh; }
+
+cmd_refresh() { need_running; refresh_creds; echo "creds refreshed"; }
+
+cmd_env() {
+  [[ -f "$SELF/.env" ]] || cp "$SELF/.env.example" "$SELF/.env"
+  exec "${EDITOR:-vi}" "$SELF/.env"
+}
+
+# Edit Pi's global settings. Bind-mounted, so edits are live; Pi loads them at
+# session start, so new sessions pick them up (a running conversation won't).
+cmd_config() {
+  mkdir -p "$PI_CONFIG/agent"
+  local f="$PI_CONFIG/agent/settings.json"
+  [[ -f "$f" ]] || echo '{}' > "$f"
+  exec "${EDITOR:-vi}" "$f"
+}
+
+# Edit the list of host skill dirs mounted into Pi. Recreate the container
+# (tau stop && tau start) to apply adds/removes — mounts are fixed at run time.
+cmd_skills() {
+  case "${1:-}" in
+    list) local skill_mounts i; build_skill_mounts
+          for ((i = 1; i < ${#skill_mounts[@]}; i += 2)); do echo "${skill_mounts[i]}"; done ;;
+    *)    exec "${EDITOR:-vi}" "$SKILLS_CONF" ;;
+  esac
+}
+
+# Workspaces are rsync'd copies under $WORKSPACE (which is bind-mounted live at
+# /workspace), so a copy is instantly visible to the agent — no recreate. The
+# original source is never modified; agent edits land only in the copy.
+# Registry line: <uuid>\t<name>\t<source-path>.
+ws_add() {
+  local dir="" name=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --cd)   shift ;;                     # handled by the shell wrapper
+      --name) name="${2:-}"; shift 2 ;;
+      *)      dir="$1"; shift ;;
+    esac
+  done
+  dir="${dir:-$PWD}"
+  local abs dest exist_src
+  abs="$(cd "$dir" 2>/dev/null && pwd)" || die "no such directory: $dir"
+  name="${name:-$(basename "$abs")}"       # default: the dir's basename
+  [[ "$name" == *[!a-zA-Z0-9_.-]* ]] && die "workspace name must be [a-zA-Z0-9_.-]: '$name'"
+  dest="$WORKSPACE/$name"
+  mkdir -p "$WORKSPACE"; touch "$WORKSPACES_FILE"
+  exist_src="$(awk -F'\t' -v n="$name" '$2==n{print $3}' "$WORKSPACES_FILE")"
+  if [[ -n "$exist_src" && "$exist_src" != "$abs" ]]; then
+    die "workspace '$name' already exists from a different source ($exist_src) — remove it or pass a different --name"
+  fi
+  rsync -a "$abs/" "$dest/" >&2 || die "rsync failed"
+  if [[ -z "$exist_src" ]]; then
+    local uuid; uuid="$(uuidgen | tr 'A-Z' 'a-z')"
+    printf '%s\t%s\t%s\n' "$uuid" "$name" "$abs" >> "$WORKSPACES_FILE"
+    echo "tau: added workspace $name (${uuid%%-*}) -> /workspace/$name" >&2
+  else
+    echo "tau: refreshed workspace $name -> /workspace/$name" >&2
+  fi
+  echo "$dest"   # stdout: host path of the copy, for the shell wrapper's --cd
+}
+
+ws_list() {
+  { [[ -f "$WORKSPACES_FILE" && -s "$WORKSPACES_FILE" ]]; } || { echo "no workspaces"; return; }
+  local uuid name src
+  printf '%-16s  %-10s  %-22s  %s\n' NAME ID CONTAINER SOURCE
+  while IFS=$'\t' read -r uuid name src; do
+    [[ -n "$uuid" ]] || continue
+    printf '%-16s  %-10s  %-22s  %s\n' "$name" "${uuid%%-*}" "/workspace/$name" "$src"
+  done < "$WORKSPACES_FILE"
+}
+
+ws_lookup() {   # echo the registry line matching a name (exact) or uuid prefix, or die
+  local q="$1" line
+  line="$(awk -F'\t' -v q="$q" '$2==q' "$WORKSPACES_FILE")"                    # exact name
+  [[ -n "$line" ]] || line="$(awk -F'\t' -v q="$q" 'index($1,q)==1' "$WORKSPACES_FILE")"  # uuid prefix
+  [[ -n "$line" ]] || die "no workspace matching '$q'"
+  [[ "$(wc -l <<<"$line")" -eq 1 ]] || die "ambiguous '$q'"
+  printf '%s\n' "$line"
+}
+
+ws_remove() {
+  [[ -n "${1:-}" ]] || die "usage: tau workspace remove <name|id>"
+  { [[ -f "$WORKSPACES_FILE" && -s "$WORKSPACES_FILE" ]]; } || die "no workspaces"
+  local line uuid name tmp
+  line="$(ws_lookup "$1")"
+  uuid="$(printf '%s' "$line" | cut -f1)"; name="$(printf '%s' "$line" | cut -f2)"
+  rm -rf "${WORKSPACE:?}/$name"
+  tmp="$(mktemp)"; awk -F'\t' -v u="$uuid" '$1!=u' "$WORKSPACES_FILE" > "$tmp" && mv "$tmp" "$WORKSPACES_FILE"
+  echo "tau: removed $name (${uuid%%-*}) — source left untouched (copy + any agent edits deleted)"
+}
+
+ws_cd() {   # print the copy's host path to stdout; the shell wrapper cds to it
+  { [[ -f "$WORKSPACES_FILE" && -s "$WORKSPACES_FILE" ]]; } || die "no workspaces"
+  local line name
+  if [[ -z "${1:-}" ]]; then
+    [[ "$(grep -c . "$WORKSPACES_FILE")" -eq 1 ]] || die "usage: tau workspace cd <name|id>"
+    line="$(grep . "$WORKSPACES_FILE" | head -1)"
+  else
+    line="$(ws_lookup "$1")"
+  fi
+  name="$(printf '%s' "$line" | cut -f2)"
+  printf '%s\n' "$WORKSPACE/$name"
+}
+
+cmd_workspace() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    add)       ws_add "$@" ;;
+    list|ls)   ws_list ;;
+    remove|rm) ws_remove "$@" ;;
+    cd)        ws_cd "$@" ;;
+    *) die "usage: tau workspace {add [dir] [--name NAME] [--cd]|list|remove <name|id>|cd <name|id>}" ;;
+  esac
+}
+
+cmd_session() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    new)
+      need_running
+      local name=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --name) name="${2:-}"; shift 2 ;;
+          *) die "unknown flag: $1" ;;
+        esac
+      done
+      refresh_creds
+      name="${name:-$(uuidgen | tr 'A-Z' 'a-z' | cut -c1-8)}"   # default: short random name
+      [[ "$name" == *[!a-zA-Z0-9_-]* ]] && die "session name must be [a-zA-Z0-9_-] (no . or :): '$name'"
+      tx has-session -t "=$name" 2>/dev/null && die "session '$name' already exists"
+      tx new-session -d -s "$name" "$PI_CMD"
+      echo "session $name started"
+      exec docker exec -it "$CONTAINER" "${TMUX[@]}" attach -t "=$name"
+      ;;
+    list)
+      need_running
+      local rows
+      rows="$(tx list-sessions -F '#{session_name}|#{session_created}|#{session_activity}' 2>/dev/null || true)"
+      [[ -n "$rows" ]] || { echo "no active sessions"; return; }
+      printf '%-20s  %-9s  %-19s  %s\n' NAME TYPE CREATED "LAST ACTIVE"
+      while IFS='|' read -r name created activity; do
+        local type=session
+        [[ "$name" == sa-* ]] && type=subagent   # pi's subagent naming convention
+        printf '%-20s  %-9s  %-19s  %s\n' \
+          "$name" "$type" "$(date -r "$created" '+%Y-%m-%d %H:%M:%S')" \
+          "$(date -r "$activity" '+%Y-%m-%d %H:%M:%S')"
+      done <<<"$rows"
+      ;;
+    kill)
+      need_running
+      [[ -n "${1:-}" ]] || die "usage: tau session kill <name|id>"
+      local full; full="$(resolve_session "$1")"
+      tx kill-session -t "=$full"
+      echo "killed $full"
+      ;;
+    attach)
+      need_running
+      [[ -n "${1:-}" ]] || die "usage: tau session attach <name|id>"
+      refresh_creds
+      local full; full="$(resolve_session "$1")"
+      exec docker exec -it "$CONTAINER" "${TMUX[@]}" attach -t "=$full"
+      ;;
+    *) die "usage: tau session {new [--name NAME]|list|kill <name>|attach <name>}" ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    start)   cmd_start "$@" ;;
+    stop)    cmd_stop "$@" ;;
+    restart) cmd_restart "$@" ;;
+    shell)   cmd_shell "$@" ;;
+    refresh) cmd_refresh "$@" ;;
+    env)     cmd_env "$@" ;;
+    config)  cmd_config "$@" ;;
+    skills)  cmd_skills "$@" ;;
+    workspace) cmd_workspace "$@" ;;
+    session) cmd_session "$@" ;;
+    -h|--help|help|"") usage ;;
+    *) usage >&2; die "unknown command: $cmd" ;;
+  esac
+}
+
+main "$@"
