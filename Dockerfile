@@ -96,9 +96,14 @@ RUN mkdir -p /home/pi/.no-mistakes /home/pi/.treehouse && \
 # both at Pi's mounted skills dir so the skill lands in pi-config (persistent)
 # and shows up in Pi's skill scan. Dangling at build time; resolves at runtime
 # once ~/.pi is mounted.
-RUN mkdir -p /home/pi/.agents && \
+RUN mkdir -p /home/pi/.agents /home/pi/.claude && \
     ln -s /home/pi/.pi/agent/skills /home/pi/.agents/skills && \
-    ln -s /home/pi/.pi/agent/skills 
+    ln -s /home/pi/.pi/agent/skills /home/pi/.claude/skills
+
+# Host<->container file dropbox. ~/share is bind-mounted from ~/.tau/share on
+# the host; create it owned by pi so the mountpoint and any pre-mount writes
+# have the right owner.
+RUN mkdir -p /home/pi/share
 
 # Treehouse reads hooks only from ~/.config/treehouse/config.toml (repo-level
 # hooks are ignored for safety). Symlink it into the mounted pi-config so hook

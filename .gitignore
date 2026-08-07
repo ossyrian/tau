@@ -25,6 +25,7 @@ pi-config/agent/skills/*
 !pi-config/agent/skills/tau
 !pi-config/agent/skills/tau-runtime
 !pi-config/agent/skills/tau-git-shipping
+!pi-config/agent/skills/tau-share
 !pi-config/agent/skills/subagent-sessions
 !pi-config/agent/skills/glossary-maintenance
 
@@ -33,6 +34,7 @@ pi-config/agent/skills/*
 pi-config/agent/extensions/*
 !pi-config/agent/extensions/tau-awareness.ts
 !pi-config/agent/extensions/git-guard.ts
+!pi-config/agent/extensions/share-tools
 !pi-config/agent/extensions/glossary-awareness.ts
 !pi-config/agent/extensions/scripts-awareness.ts
 !pi-config/agent/extensions/todos.ts

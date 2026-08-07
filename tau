@@ -23,14 +23,23 @@ SELF="$(cd -P "$(dirname "$__src")" && pwd)"
 CONTAINER="tau"
 IMAGE="tau:latest"
 PROFILE="${PI_AWS_PROFILE:-}"
-SCRIPTS="${PI_SCRIPTS:-$SELF/scripts}"
-WORKSPACE="${PI_WORKSPACE:-$SELF/workspace}"
-PI_CONFIG="${PI_CONFIG:-$SELF/pi-config}"    # host mount for Pi's global ~/.pi
-SKILLS_CONF="${PI_SKILLS_CONF:-$SELF/skills.conf}"   # host skill dirs to mount
-WORKSPACES_FILE="${PI_WORKSPACES_FILE:-$SELF/workspaces.conf}"   # registry: <uuid>\t<path>
+
+# Host-side state root. All per-user runtime state lives under ~/.tau so the
+# tau repo checkout stays clean (config, workspaces, scripts, pi-config, and
+# the share dropbox are user data, not repo files). Override with TAU_HOME.
+# The individual PI_* env vars still override any single path.
+TAU_HOME="${TAU_HOME:-$HOME/.tau}"
+SCRIPTS="${PI_SCRIPTS:-$TAU_HOME/scripts}"
+WORKSPACE="${PI_WORKSPACE:-$TAU_HOME/workspace}"
+SHARE="${PI_SHARE:-$TAU_HOME/share}"          # host<->container file dropbox
+PI_CONFIG="${PI_CONFIG:-$TAU_HOME/pi}"        # host mount for Pi's global ~/.pi
+SKILLS_CONF="${PI_SKILLS_CONF:-$TAU_HOME/skills.conf}"   # host skill dirs to mount
+WORKSPACES_FILE="${PI_WORKSPACES_FILE:-$TAU_HOME/workspaces.conf}"   # registry: <uuid>\t<path>
+ENV_FILE="${PI_ENV_FILE:-$TAU_HOME/.env}"
+GITCONFIG_FILE="${PI_GITCONFIG:-$TAU_HOME/.gitconfig}"
 REGION="${AWS_REGION:-us-east-1}"
 PI_CMD="${PI_CMD:-pi}"                       # command that starts a Pi conversation
-CRED_DIR="/home/pi/.tau"
+CRED_DIR="/home/pi/.tau"                     # container path (tmpfs) — NOT the host TAU_HOME
 CRED_FILE="$CRED_DIR/credentials"
 TMUX=(tmux -L tau -f /etc/tau/tmux.conf)     # dedicated socket + minimal config
 
@@ -46,9 +55,13 @@ Container:
   restart            restart if running, else noop (sessions lost)
   shell              open an interactive zsh
   refresh            re-push fresh temp creds without a restart
-  env                edit the scoped-token .env in $EDITOR
+  env                edit the scoped-token .env (~/.tau/.env) in $EDITOR
+  gitconfig          edit the container git identity (~/.tau/.gitconfig) in $EDITOR
   config             edit Pi's global settings.json in $EDITOR
   skills [list]      edit skills.conf (host dirs mounted into Pi), or list mounts
+  migrate            relocate legacy repo-side state into ~/.tau (one-time)
+
+Shared files land in ~/.tau/share on the host (~/share in the container).
 
 Workspaces (copied into the live-mounted workspace/ — instant, no restart):
   workspace add [dir] [--name NAME] [--cd] [--live]
@@ -74,10 +87,13 @@ Env:
   PI_AWS_PROFILE   readonly-scoped AWS profile (optional; set to use AWS inside the container)
   PI_CMD           command that starts a Pi conversation (default: pi)
   AWS_REGION       default: us-east-1
-  PI_SCRIPTS / PI_WORKSPACE / PI_CONFIG   host dirs bind-mounted into the container
-                   (scripts, /workspace, ~/.pi)
-  PI_SKILLS_CONF   path to skills.conf (default: alongside this script)
-  EDITOR           used by `tau env` / `tau config` / `tau skills`
+  TAU_HOME         host state root for all per-user files (default: ~/.tau) —
+                   holds .env, .gitconfig, share/, scripts/, workspace/, pi/,
+                   skills.conf, workspaces.conf
+  PI_SCRIPTS / PI_WORKSPACE / PI_SHARE / PI_CONFIG   override individual host dirs
+                   bind-mounted into the container (scripts, /workspace, ~/share, ~/.pi)
+  PI_SKILLS_CONF   path to skills.conf (default: $TAU_HOME/skills.conf)
+  EDITOR           used by `tau env` / `tau gitconfig` / `tau config` / `tau skills`
 EOF
 }
 
@@ -197,16 +213,34 @@ print_table() {
   done
 }
 
+# Seed tau-standard Pi config (the tracked subset of ./pi-config, e.g. tau-*
+# skills and standard extensions) into the runtime config dir ($PI_CONFIG,
+# default ~/.tau/pi). Repo files are the source of truth for tau-standard
+# functionality and overwrite their runtime copies on every start, so a
+# `git pull` of the tau repo ships updated skills/extensions. User files in
+# $PI_CONFIG that don't exist in the repo (settings.json, models.json,
+# APPEND_SYSTEM.md, sessions, the user's own skills) are left untouched.
+seed_pi_config() {
+  local repo_cfg="$SELF/pi-config"
+  [[ -d "$repo_cfg" && "$repo_cfg" != "$PI_CONFIG" ]] || return 0
+  # Only the git-tracked files are tau-standard; copy exactly those.
+  ( cd "$repo_cfg" && git ls-files -z 2>/dev/null ) | while IFS= read -r -d '' rel; do
+    mkdir -p "$PI_CONFIG/$(dirname "$rel")"
+    cp "$repo_cfg/$rel" "$PI_CONFIG/$rel"
+  done
+}
+
 # Always a fresh `docker run` — `docker start`/`restart` reuse the old config and
 # would NOT pick up .env, -e, or mount changes. A stopped container has no live
 # sessions or creds, so recreating loses nothing.
 create_container() {
   exists && docker rm -f "$CONTAINER" >/dev/null
   local env_file_args=()
-  [[ -f "$SELF/.env" ]] && env_file_args+=(--env-file "$SELF/.env")
+  [[ -f "$ENV_FILE" ]] && env_file_args+=(--env-file "$ENV_FILE")
   local gitconfig_args=()
-  [[ -f "$SELF/.gitconfig" ]] && gitconfig_args+=(-v "$SELF/.gitconfig:/home/pi/.gitconfig:ro")
-  mkdir -p "$SCRIPTS" "$WORKSPACE" "$PI_CONFIG/agent/skills" "$PI_CONFIG/agent/treehouse"
+  [[ -f "$GITCONFIG_FILE" ]] && gitconfig_args+=(-v "$GITCONFIG_FILE:/home/pi/.gitconfig:ro")
+  mkdir -p "$SCRIPTS" "$WORKSPACE" "$SHARE" "$PI_CONFIG/agent/skills" "$PI_CONFIG/agent/treehouse"
+  seed_pi_config
   local skill_mounts; build_skill_mounts
   local live_ws_mounts; build_live_ws_mounts
   # Named volumes for treehouse pools and no-mistakes state (NM_HOME): a new
@@ -221,6 +255,7 @@ create_container() {
     "${env_file_args[@]+"${env_file_args[@]}"}" \
     -v "$WORKSPACE":/workspace \
     -v "$SCRIPTS":/home/pi/scripts \
+    -v "$SHARE":/home/pi/share \
     -v "$PI_CONFIG":/home/pi/.pi \
     "${gitconfig_args[@]+"${gitconfig_args[@]}"}" \
     "${skill_mounts[@]+"${skill_mounts[@]}"}" \
@@ -252,8 +287,17 @@ cmd_shell() { need_running; refresh_creds; exec docker exec -it "$CONTAINER" zsh
 cmd_refresh() { need_running; refresh_creds; [[ -n "$PROFILE" ]] && echo "creds refreshed"; }
 
 cmd_env() {
-  [[ -f "$SELF/.env" ]] || cp "$SELF/.env.example" "$SELF/.env"
-  exec "${EDITOR:-vi}" "$SELF/.env"
+  mkdir -p "$TAU_HOME"
+  [[ -f "$ENV_FILE" ]] || cp "$SELF/.env.example" "$ENV_FILE"
+  exec "${EDITOR:-vi}" "$ENV_FILE"
+}
+
+# Edit the container's git identity + credential helper. Bind-mounted read-only;
+# recreate (tau restart) to apply.
+cmd_gitconfig() {
+  mkdir -p "$TAU_HOME"
+  [[ -f "$GITCONFIG_FILE" ]] || cp "$SELF/.gitconfig.example" "$GITCONFIG_FILE"
+  exec "${EDITOR:-vi}" "$GITCONFIG_FILE"
 }
 
 # Edit Pi's global settings. Bind-mounted, so edits are live; Pi loads them at
@@ -271,9 +315,49 @@ cmd_skills() {
   case "${1:-}" in
     list) local skill_mounts i; build_skill_mounts
           for ((i = 1; i < ${#skill_mounts[@]}; i += 2)); do echo "${skill_mounts[i]}"; done ;;
-    *)    [[ -f "$SKILLS_CONF" ]] || cp "$SELF/skills.conf.example" "$SKILLS_CONF" 2>/dev/null || true
+    *)    mkdir -p "$TAU_HOME"
+          [[ -f "$SKILLS_CONF" ]] || cp "$SELF/skills.conf.example" "$SKILLS_CONF" 2>/dev/null || true
           exec "${EDITOR:-vi}" "$SKILLS_CONF" ;;
   esac
+}
+
+# One-time relocation of legacy repo-side state ($SELF/*) into $TAU_HOME. Moves
+# each item only if the source exists and the destination doesn't, so it's safe
+# to re-run and never clobbers. Container must be recreated afterward to pick up
+# the new mount sources.
+cmd_migrate() {
+  mkdir -p "$TAU_HOME"
+  local moved=0
+  # legacy path -> new path under $TAU_HOME
+  local pairs=(
+    "$SELF/.env:$ENV_FILE"
+    "$SELF/.gitconfig:$GITCONFIG_FILE"
+    "$SELF/skills.conf:$TAU_HOME/skills.conf"
+    "$SELF/workspaces.conf:$TAU_HOME/workspaces.conf"
+    "$SELF/pi-config:$TAU_HOME/pi"
+    "$SELF/scripts:$TAU_HOME/scripts"
+    "$SELF/workspace:$TAU_HOME/workspace"
+  )
+  local pair src dst
+  for pair in "${pairs[@]}"; do
+    src="${pair%%:*}"; dst="${pair#*:}"
+    [[ -e "$src" ]] || continue
+    if [[ -e "$dst" ]]; then
+      echo "skip  $src -> $dst (destination exists)"
+      continue
+    fi
+    mkdir -p "$(dirname "$dst")"
+    cp -R "$src" "$dst"
+    echo "moved $src -> $dst"
+    moved=$((moved + 1))
+  done
+  echo
+  if [[ $moved -gt 0 ]]; then
+    echo "$moved item(s) relocated to $TAU_HOME."
+    echo "Verify, then remove the legacy copies from the repo checkout and run 'tau restart'."
+  else
+    echo "nothing to migrate ($TAU_HOME already populated or no legacy state)."
+  fi
 }
 
 # Workspaces come in two modes:
@@ -471,10 +555,12 @@ main() {
     shell)   cmd_shell "$@" ;;
     refresh) cmd_refresh "$@" ;;
     env)     cmd_env "$@" ;;
+    gitconfig) cmd_gitconfig "$@" ;;
     config)  cmd_config "$@" ;;
     skills)  cmd_skills "$@" ;;
     workspace) cmd_workspace "$@" ;;
     session) cmd_session "$@" ;;
+    migrate) cmd_migrate "$@" ;;
     -h|--help|help|"") usage ;;
     *) usage >&2; die "unknown command: $cmd" ;;
   esac

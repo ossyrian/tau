@@ -2,8 +2,8 @@
  * Git guard: mechanical enforcement of tau's git workflow rules.
  *
  * Intercepts bash tool calls and blocks:
- *   1. ANY git command touching /workspace/tau_share (the user is the git
- *      gate there, by design).
+ *   1. ANY git command touching ~/share (the host<->container dropbox is not
+ *      a git working tree; the user is the git gate for anything there).
  *   2. `git push` to anything other than the `no-mistakes` remote — work
  *      ships through the gate pipeline, not straight to origin.
  *   3. Merges of PRs (`gh pr merge`, merge via `gh api`) — merging is the
@@ -21,7 +21,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
-const TAU_SHARE = "tau_share";
+// The share dropbox: ~/share in the container, bind-mounted from ~/.tau/share
+// on the host. Match both the literal path and the ~ form the agent might type.
+const SHARE_PATHS = ["/home/pi/share", "/root/share"];
+const SHARE_TARGET = "~/share";
 
 /** Split a shell command into segments at unquoted-ish separators. Heuristic:
  * we don't fully parse shell; quoted separators cause over-splitting, which
@@ -46,23 +49,24 @@ interface Verdict {
 
 export function analyzeCommand(command: string, cwd: string): Verdict {
 	const segments = splitSegments(command);
-	const mentionsTauShare = command.includes(TAU_SHARE);
-	const cwdInTauShare = cwd.includes(`/${TAU_SHARE}`);
+	const mentionsShare = command.includes(SHARE_TARGET) || SHARE_PATHS.some((p) => command.includes(p));
+	const cwdInShare = SHARE_PATHS.some((p) => cwd === p || cwd.startsWith(`${p}/`));
 
 	const anyGit = segments.some(isGitInvocation);
 
-	// Rule 1: no git in tau_share — not even read-only. Blocks any command
-	// that both invokes git and touches tau_share (cwd or mention), even when
-	// the git segment isn't the one naming it (`cd tau_share && git diff`).
-	// Over-blocks mixed commands like `git log && cat tau_share/x` — fine:
-	// the agent can split them.
-	if (anyGit && (cwdInTauShare || mentionsTauShare)) {
+	// Rule 1: no git in the share dropbox — not even read-only. Blocks any
+	// command that both invokes git and touches ~/share (cwd or mention), even
+	// when the git segment isn't the one naming it (`cd ~/share && git init`).
+	// Over-blocks mixed commands like `git log && cat ~/share/x` — fine: the
+	// agent can split them. The share dir is a file dropbox, not a repo.
+	if (anyGit && (cwdInShare || mentionsShare)) {
 		return {
 			block: true,
 			reason:
-				"git is forbidden in /workspace/tau_share — the user is the gate for every git operation there. " +
-				"Do the non-git work, then hand the user the exact commands, files, and commit message to run themselves. " +
-				"(If your git command was for a different repo, split it from anything mentioning tau_share.)",
+				"git is forbidden in ~/share — it's the host dropbox, not a git working tree. " +
+				"Use the share_file tool (or just write files into ~/share) to hand things to the user; " +
+				"if you genuinely need git on a repo, work in /workspace, not ~/share. " +
+				"(If your git command was for a different path, split it from anything mentioning ~/share.)",
 		};
 	}
 

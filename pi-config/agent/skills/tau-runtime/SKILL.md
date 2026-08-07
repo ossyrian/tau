@@ -16,6 +16,7 @@ The container is recreated on every `tau start` / `stop` / `restart`. Anything w
 | `~/.pi/agent/` | your config + skills | host-mounted, read-write, survives recreate |
 | `/workspace/` | working files; `/workspace/<name>` are either live binds into the user's project or copy mounts (snapshots) | host-mounted (virtiofs), read-write |
 | `~/scripts/` | reusable shell scripts you're expected to know about and reach for | host-mounted (virtiofs), read-write, survives recreate |
+| `~/share/` | file dropbox to the user's host machine (lands at `~/.tau/share`) | host-mounted; the sanctioned way to hand files out — see `tau-share` |
 | `~/.pi/agent/skills/<name>/` (the seeded ones) | skills the user shares from their own machine | edits write back to the user's real files — see warning below |
 | `~/.treehouse/` | treehouse worktree pools | Docker volume, survives recreate |
 | `~/.no-mistakes/` | no-mistakes state (gate repos, runs, SQLite) | Docker volume, survives recreate |

@@ -5,7 +5,7 @@ Docker sandbox that runs Pi with short-lived, readonly-scoped AWS credentials an
 ## Architecture
 
 - **Readonly AWS credentials** (short-lived, scoped) — you cannot escalate or reach production
-- **Persistent mounts**: `~/.pi/agent/` (config, skills), `/workspace/` (project copies / live mounts), `~/scripts/` (reusable scripts)
+- **Persistent mounts** (all under host `~/.tau/`): `~/.pi/agent/` (config, skills), `/workspace/` (project copies / live mounts), `~/scripts/` (reusable scripts), `~/share/` (file dropbox back to the host)
 - **Ephemeral container**: recreated on restart; tmpfs credentials are wiped
 
 Short-lived creds and ephemeral storage block accidental production writes and credential leaks; the mounts keep the sandbox useful for real dev and debugging work across your services.
@@ -129,13 +129,22 @@ tau refresh    # Re-push fresh creds without restart
 
 | Path | Persists? | Notes |
 |------|-----------|-------|
-| `~/.pi/agent/` | ✅ Yes | Config, skills, models (host bind-mount) |
-| `/workspace/` | ✅ Yes | Project copies and live mounts (host bind-mount) |
-| `~/scripts/` | ✅ Yes | Shell scripts (host bind-mount) |
+| `~/.pi/agent/` | ✅ Yes | Config, skills, models (host `~/.tau/pi`) |
+| `/workspace/` | ✅ Yes | Project copies and live mounts (host `~/.tau/workspace`) |
+| `~/scripts/` | ✅ Yes | Shell scripts (host `~/.tau/scripts`) |
+| `~/share/` | ✅ Yes | File dropbox to the host (host `~/.tau/share`) — the way to hand files back |
 | `~/.treehouse/` | ✅ Yes | Treehouse worktree pools (named Docker volume `tau-treehouse`) |
 | `~/.no-mistakes/` | ✅ Yes | no-mistakes state: gate repos, runs, SQLite (named volume `tau-nm-home`) |
-| `~/.tau/` | ❌ No | AWS credentials (tmpfs, wiped on recreate) |
+| `~/.tau/` (container) | ❌ No | AWS credentials (tmpfs, wiped on recreate) |
 | `/tmp/`, `/home/pi` (rest) | ❌ No | Lost on restart |
+
+All host-side state lives under `~/.tau/` on the user's machine (`~/.tau/pi`,
+`~/.tau/workspace`, `~/.tau/scripts`, `~/.tau/share`, `~/.tau/.env`, etc.). The
+container-side `~/.tau/` above is a different path (a tmpfs for creds) — don't
+conflate them.
+
+To hand a file back to the user's machine, write it into `~/share` (or use the
+`share_file` tool). It's the only file channel out of the sandbox.
 
 A restart kills any in-flight no-mistakes pipeline run (crash recovery marks it
 failed). Check `no-mistakes axi status` before restarting.
@@ -292,11 +301,18 @@ cd /workspace/myproject  # Then work there
 | `PI_AWS_PROFILE` | Readonly AWS profile (optional; set to use AWS inside the container) | `readonly-tau` |
 | `PI_CMD` | Command to start a Pi session | `pi` (default) |
 | `AWS_REGION` | AWS region for cred refresh | `us-east-1` (default) |
-| `PI_SCRIPTS` | Host directory of reusable scripts to mount | `~/scripts` |
-| `PI_WORKSPACE` | Host directory for project copies | `./workspace` |
-| `PI_CONFIG` | Host directory for Pi config and skills | `./pi-config` |
-| `PI_SKILLS_CONF` | Path to skills mount config | `./skills.conf` |
-| `PI_WORKSPACES_FILE` | Path to workspaces registry | `./workspaces.conf` |
+| `TAU_HOME` | Host state root for all per-user files | `~/.tau` (default) |
+| `PI_SCRIPTS` | Host directory of reusable scripts to mount | `~/.tau/scripts` |
+| `PI_WORKSPACE` | Host directory for project copies | `~/.tau/workspace` |
+| `PI_SHARE` | Host directory for the file dropbox | `~/.tau/share` |
+| `PI_CONFIG` | Host directory for Pi config and skills | `~/.tau/pi` |
+| `PI_SKILLS_CONF` | Path to skills mount config | `~/.tau/skills.conf` |
+| `PI_WORKSPACES_FILE` | Path to workspaces registry | `~/.tau/workspaces.conf` |
+| `PI_ENV_FILE` | Path to the injected `.env` | `~/.tau/.env` |
+| `PI_GITCONFIG` | Path to the container git identity | `~/.tau/.gitconfig` |
+
+All default under `TAU_HOME` (`~/.tau`); each `PI_*` var overrides its single path.
+Legacy checkouts that kept state next to the CLI can relocate it with `tau migrate`.
 
 ## Image and Build
 

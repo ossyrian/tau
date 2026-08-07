@@ -12,7 +12,8 @@ Everything listed here ships with the tau repo and is present in every tau insta
 | Skill | Covers |
 |-------|--------|
 | `tau-runtime` | The sandbox itself: what persists vs is wiped, workspace live-bind vs copy semantics, `~/scripts/`, your own config/skills/system prompt, talking to other tmux sessions |
-| `tau-git-shipping` | Git and GitHub in the container: cloning with the token credential helper, treehouse worktrees, shipping through the no-mistakes pipeline, the `tau_share` no-git rule, the git-guard |
+| `tau-share` | Handing files back to the user's host machine via the `~/share` dropbox and the `share_file` / `share_list` tools |
+| `tau-git-shipping` | Git and GitHub in the container: cloning with the token credential helper, treehouse worktrees, shipping through the no-mistakes pipeline, the `~/share` no-git rule, the git-guard |
 | `subagent-sessions` | Delegating work to other pi sessions in this tmux harness |
 | `glossary-maintenance` | Maintaining the user's term→referent glossary |
 | `no-mistakes` | Driving the validation pipeline (`no-mistakes axi`). Installed per-container by `no-mistakes init`, not tracked in the repo — if missing, run `no-mistakes init` in any repo |
@@ -22,7 +23,8 @@ Everything listed here ships with the tau repo and is present in every tau insta
 | Extension | Does |
 |-----------|------|
 | `tau-awareness.ts` | Appends the tau runtime block (sandbox identity + skill pointers) to every session's system prompt |
-| `git-guard.ts` | Blocks git in `tau_share`, direct pushes past the no-mistakes gate, and PR merges. `/git-guard` to inspect; only the user can disable |
+| `git-guard.ts` | Blocks git in `~/share`, direct pushes past the no-mistakes gate, and PR merges. `/git-guard` to inspect; only the user can disable |
+| `share-tools/` | `share_file` / `share_list` — copy deliverables into `~/share` to hand them to the user's host machine |
 | `workspace-tools/` | `workspace_list` / `workspace_path` — read-only visibility into `/workspace/<name>` mounts and their kind (live vs copy) |
 | `subagent-sessions/` | Spawn and message other pi sessions (`subagent_list`, `subagent_send`, …) |
 | `scripts-awareness.ts` | Lists `~/scripts/` with descriptions in the system prompt |
@@ -32,6 +34,10 @@ Everything listed here ships with the tau repo and is present in every tau insta
 ## Bundled binaries (Docker image)
 
 `git`, `gh`, `treehouse` (pooled worktrees; config at `~/.pi/agent/treehouse/config.toml`), `no-mistakes` (gated-push pipeline; state on the `tau-nm-home` volume), `tmux`, `node`, `uv`, `aws`.
+
+## Host layout
+
+All per-user host state lives under `~/.tau/` (override with `TAU_HOME`): `.env`, `.gitconfig`, `share/` (↔ container `~/share`), `scripts/` (→ `~/scripts`), `workspace/` (→ `/workspace`), `pi/` (→ `~/.pi`), `skills.conf`, `workspaces.conf`. The tau repo checkout itself holds only the image, the CLI, and tau-standard config — no user state.
 
 ## Not standard (user customization)
 

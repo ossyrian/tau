@@ -7,11 +7,9 @@ description: How to do git work and ship changes from inside the tau sandbox —
 
 You have real git access. You commit and push **as the user** — auth is HTTPS via the `GITHUB_TOKEN` env var (a PAT), wired through the credential helper in `~/.gitconfig`. `gh` reads the same token. There are no SSH keys in this container.
 
-## Hard rule: `tau_share` has no git
+## Hard rule: no git in `~/share`
 
-In the `/workspace/tau_share` workspace, **do not run any git command** — not `commit`, `push`, `pull`, `checkout`, `merge`, `rebase`, `add`, `stash`, `tag`, `reset`, `cherry-pick`, `fetch`, `clone`, or read-only inspection like `status`, `log`, `diff`, `branch`, `show`. The user is the gate between you and any git operation there. If a task needs git in `tau_share`, do everything else and hand the user exactly what to run: the command, the files to include, and a ready-to-use commit message.
-
-This applies only to `/workspace/tau_share`. Other workspaces follow the workflow below.
+`~/share` is the host file dropbox (see `tau-share`), not a git working tree. **Do not run any git command there** — not `init`, `clone`, `commit`, `add`, or even read-only `status`/`log`. To hand files to the user, use `share_file`; to version-control code, work in `/workspace`. The git-guard blocks git in `~/share`.
 
 ## How work ships
 

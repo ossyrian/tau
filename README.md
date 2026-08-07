@@ -31,19 +31,30 @@ Tracked:
   `tau-awareness` extension injects the runtime block into every session's system
   prompt, so `APPEND_SYSTEM.md` stays purely user territory.
 
-Per-user / runtime, gitignored:
+The repo checkout stays clean: all per-user runtime state lives under **`~/.tau/`**
+on the host (override with `TAU_HOME`), not next to the CLI. Everything there is the
+user's; nothing is tracked by this repo:
 
-- `.env` — external tokens, runtime-injected.
-- `.gitconfig` — git identity + GitHub credential helper for the agent, mounted read-only if present.
-- `skills.conf` — host skill dirs mounted into Pi.
-- `scripts/` — the agent's own scripts (see `scripts/README.md`).
-- `workspace/` — mounted read-write into the container. Agent output lands here.
-- `workspaces.conf` — workspace registry, managed by `tau workspace`.
-- `pi-config/` (the rest) — Pi's `~/.pi` runtime state and user customization:
-  settings, models, sessions, `APPEND_SYSTEM.md`, your own skills and extensions.
-  Anything here not explicitly un-ignored in `.gitignore` stays untracked. To promote
-  a skill or extension to tau-standard: add a negation in `.gitignore` and list it in
-  the `tau` index skill.
+- `~/.tau/.env` — external tokens, runtime-injected (`tau env`).
+- `~/.tau/.gitconfig` — git identity + GitHub credential helper (`tau gitconfig`), mounted read-only.
+- `~/.tau/skills.conf` — host skill dirs mounted into Pi (`tau skills`).
+- `~/.tau/scripts/` → `~/scripts` — the agent's own scripts.
+- `~/.tau/workspace/` → `/workspace` — project copies and live mounts. Agent output lands here.
+- `~/.tau/workspaces.conf` — workspace registry, managed by `tau workspace`.
+- `~/.tau/share/` → `~/share` — file dropbox: what the agent writes here appears on the host.
+- `~/.tau/pi/` → `~/.pi` — Pi's runtime state and user customization: settings, models,
+  sessions, `APPEND_SYSTEM.md`, and the user's own skills/extensions.
+
+On `tau start`, the git-tracked files under `./pi-config/` (the tau-standard skills and
+extensions above) are copied into `~/.tau/pi/`, overwriting their runtime copies — so a
+`git pull` of this repo ships updated tau-standard functionality. User files in
+`~/.tau/pi/` that aren't in the repo are never touched. To promote a skill or extension to
+tau-standard: add it under `./pi-config/`, un-ignore it in `.gitignore`, and list it in the
+`tau` index skill.
+
+Migrating an older checkout that kept state next to the CLI: `tau migrate` relocates
+`.env`, `.gitconfig`, `pi-config/`, `workspace/`, `scripts/`, and the `*.conf` files into
+`~/.tau/` (non-destructive; skips anything already present).
 
 ## What persists vs what's wiped
 
@@ -52,12 +63,13 @@ paths survive; everything else is lost.
 
 | Path | Persists? | Holds |
 |------|-----------|-------|
-| `pi-config/` → `~/.pi` | yes | Pi settings, models, extensions, skills |
-| `workspace/` → `/workspace` | yes | project copies and live mounts |
-| `scripts/` → `~/scripts` | yes | reusable shell scripts |
+| `~/.tau/pi/` → `~/.pi` | yes | Pi settings, models, extensions, skills |
+| `~/.tau/workspace/` → `/workspace` | yes | project copies and live mounts |
+| `~/.tau/scripts/` → `~/scripts` | yes | reusable shell scripts |
+| `~/.tau/share/` → `~/share` | yes | host↔container file dropbox |
 | `tau-treehouse` volume → `~/.treehouse` | yes | treehouse worktree pools |
 | `tau-nm-home` volume → `~/.no-mistakes` | yes | no-mistakes state (gate repos, runs, SQLite) |
-| `~/.tau/` (creds) | no — tmpfs | wiped on recreate |
+| container `~/.tau/` (creds) | no — tmpfs | wiped on recreate (this is a container path, not host `~/.tau`) |
 
 The two named Docker volumes are a third persistence class: they survive recreates like
 the bind mounts, but live in Docker rather than the host tree (SQLite is unreliable on
@@ -68,12 +80,12 @@ pipeline run — check `no-mistakes axi status` from `tau shell` before restarti
 ## Setup
 
 1. `./build.sh`
-2. `cp .env.example .env` and fill any external tokens you want injected (optional).
-3. `cp skills.conf.example skills.conf` and list host skill dirs to share (optional;
-   `tau skills` also seeds this on first edit).
-4. `cp .gitconfig.example .gitconfig` and set the agent's git identity (optional).
+2. `tau env` and fill any external tokens you want injected (optional; seeds `~/.tau/.env`).
+3. `tau skills` and list host skill dirs to share (optional; seeds `~/.tau/skills.conf`).
+4. `tau gitconfig` and set the agent's git identity (optional; seeds `~/.tau/.gitconfig`).
    The template wires GitHub auth to the `GITHUB_TOKEN` from `.env` via a credential
    helper — the token's scope, not the identity, bounds what the agent can reach.
+   (These `tau` subcommands create `~/.tau/` and copy from the repo `*.example` templates.)
 5. Optionally symlink `tau` onto your PATH — it resolves through symlinks.
 6. Start the sandbox and a session:
 
@@ -96,6 +108,19 @@ echo "source $PWD/tau.bash" >> ~/.bashrc   # or ~/.zshrc
 # fish
 echo "source $PWD/tau.fish" >> ~/.config/fish/config.fish
 ```
+
+## Sharing files back to the host
+
+The container is isolated, so files the agent creates don't reach your machine on
+their own. The one channel out is the **share dropbox**: `~/share` in the container
+is bind-mounted from `~/.tau/share` on the host. Anything the agent writes there
+appears on your machine immediately.
+
+The `share-tools` extension gives the agent a `share_file` tool (copy a file or
+directory into the dropbox, refuses to clobber, reports the host path) and
+`share_list`; the `tau-share` skill tells it when to reach for them. For code changes
+to a tracked repo it ships a PR through no-mistakes instead — the dropbox is for
+deliverables, not for landing commits, and the git-guard blocks git inside `~/share`.
 
 ## Git, treehouse, and no-mistakes
 
@@ -121,7 +146,7 @@ To watch or steer a run yourself: `tau shell`, `cd` into the repo, `no-mistakes`
 (TUI) or `no-mistakes axi status`.
 
 A `git-guard` Pi extension (`pi-config/agent/extensions/git-guard.ts`) backs the
-prompt rules with mechanical blocks: no git in `tau_share`, no direct pushes past
+prompt rules with mechanical blocks: no git in `~/share`, no direct pushes past
 the gate, no PR merges. Block reasons point the agent at the correct path. It's a
 heuristic on bash commands — it bounds accidents, not adversaries; branch
 protection is the real backstop. `/git-guard off` disables it for a session (user
