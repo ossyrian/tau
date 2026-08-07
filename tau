@@ -8,7 +8,8 @@
 # tmpfs (AWS_SHARED_CREDENTIALS_FILE, set in the image). The host resolves fresh
 # readonly-scoped temp creds and pipes them in — never onto host disk. `refresh`
 # rewrites that file, so a long-lived container survives cred expiry without
-# losing running Pi sessions.
+# losing running Pi sessions. PI_AWS_PROFILE is optional: omit it to run without
+# AWS access; set it (at start, session, shell, or refresh) to push creds in.
 set -euo pipefail
 
 # Resolve SELF through symlinks so `tau` works when symlinked onto PATH.
@@ -40,32 +41,37 @@ tau — sandbox CLI for the Pi Coding Agent container.
 Usage: tau <command> [args]
 
 Container:
-  start              run the container (or resume if stopped), push fresh creds
-  stop               stop the container (running sessions are lost)
-  restart            restart if running, else noop (running sessions are lost)
-  shell              open an interactive zsh in the container
+  start              run or resume the container, push fresh creds
+  stop               stop the container (sessions lost)
+  restart            restart if running, else noop (sessions lost)
+  shell              open an interactive zsh
   refresh            re-push fresh temp creds without a restart
-  env                edit the scoped-token .env file in $EDITOR
+  env                edit the scoped-token .env in $EDITOR
   config             edit Pi's global settings.json in $EDITOR
-  skills [list]      edit skills.conf (host dirs mounted into Pi), or list resolved mounts
+  skills [list]      edit skills.conf (host dirs mounted into Pi), or list mounts
 
-Workspaces (rsync'd into the live-mounted workspace/ — instant, no restart):
-  workspace add [dir] [--name NAME] [--cd]  rsync dir (default PWD) into /workspace/<name>
-                              --name sets the name (default: dir basename)
-  workspace list              list workspaces: name, id, container path, source
-  workspace remove <name|id>  delete the copy (source untouched); by name or id prefix
-  workspace cd <name|id>      cd into the copy (needs the tau.fish wrapper)
+Workspaces (copied into the live-mounted workspace/ — instant, no restart):
+  workspace add [dir] [--name NAME] [--cd] [--live]
+                              copy dir (default PWD) into /workspace/<name>; edits stay in the
+                              copy. --live: bind-mount your real source read/write (shared, no
+                              isolation), applies on next 'tau restart'. --name defaults to
+                              the dir basename.
+  workspace list              name, id, mode, container path, source
+  workspace remove <name|id>  delete the copy, or unregister a live mount (source untouched;
+                              a live mount unmounts on next 'tau restart'). Match by name or
+                              id prefix.
+  workspace cd <name|id>      cd into the copy, or the source for --live (needs tau.fish)
 
 Sessions (container must be running):
-  session new [--name NAME]   start a Pi conversation and attach (--name, else random)
-  session list                list sessions: name, type, created, last active
-  session kill <name>         kill a session by name (or unique prefix)
-  session attach <name>       reattach a session by name (or unique prefix)
+  session new [NAME]          start a Pi conversation and attach (NAME optional, else random)
+  session list                name, type, created, last active
+  session kill <name>         kill by name (or unique prefix)
+  session attach <name>       reattach by name (or unique prefix)
 
-Detach from a session with Ctrl-b d — Pi keeps running.
+Detach with Ctrl-b d — Pi keeps running.
 
 Env:
-  PI_AWS_PROFILE   (required for start/refresh/session/shell) readonly-scoped AWS profile
+  PI_AWS_PROFILE   readonly-scoped AWS profile (optional; set to use AWS inside the container)
   PI_CMD           command that starts a Pi conversation (default: pi)
   AWS_REGION       default: us-east-1
   PI_SCRIPTS / PI_WORKSPACE / PI_CONFIG   host dirs bind-mounted into the container
@@ -76,6 +82,12 @@ EOF
 }
 
 die()  { echo "tau: $*" >&2; exit 1; }
+
+# uuidgen (macOS, util-linux) with a Linux kernel fallback.
+gen_uuid() { uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid; }
+
+# Portable epoch -> human time. BSD `date -r N` (macOS) vs GNU `date -d @N` (Linux).
+fmt_epoch() { date -r "$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date -d "@$1" '+%Y-%m-%d %H:%M:%S'; }
 exists()  { docker container inspect "$CONTAINER" &>/dev/null; }
 running() { [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" == true ]]; }
 need_running() { running || die "container not running — 'tau start' first"; }
@@ -87,7 +99,10 @@ tx()     { dexec "${TMUX[@]}" "$@"; }                    # tmux, non-interactive
 
 # Resolve fresh temp creds on the host and pipe them into the container tmpfs.
 refresh_creds() {
-  [[ -n "$PROFILE" ]] || die "set PI_AWS_PROFILE to your readonly-scoped profile"
+  if [[ -z "$PROFILE" ]]; then
+    echo "tau: PI_AWS_PROFILE not set — skipping AWS credential push (set it to use AWS inside the container)" >&2
+    return 0
+  fi
   local creds
   if ! creds="$(aws configure export-credentials --profile "$PROFILE" --format env 2>/dev/null)"; then
     echo "tau: could not export creds for profile '$PROFILE'." >&2
@@ -127,6 +142,21 @@ build_skill_mounts() {
   done < "$SKILLS_CONF"
 }
 
+# Live workspaces: bind-mount the real source at /workspace/<name>, layered on top
+# of the /workspace bind mount. Mounts are fixed at run time, so live add/remove
+# applies on the next 'tau restart' — same rule as skills.conf.
+build_live_ws_mounts() {
+  live_ws_mounts=()
+  [[ -f "$WORKSPACES_FILE" ]] || return 0
+  local uuid name src mode
+  while IFS=$'\t' read -r uuid name src mode; do
+    [[ -n "$uuid" ]] || continue
+    [[ "${mode:-copy}" == live ]] || continue
+    [[ -d "$src" ]] || { echo "tau: live workspace source not found, skipping: $name -> $src" >&2; continue; }
+    live_ws_mounts+=(-v "$src:/workspace/$name")
+  done < "$WORKSPACES_FILE"
+}
+
 # The tmux session_name IS the name (no uuids). Resolve an exact name, else a
 # unique prefix. Echoes the matched session_name.
 resolve_session() {
@@ -140,6 +170,33 @@ resolve_session() {
   echo "$match"
 }
 
+# Print stdin as an aligned table. Each line is a row; columns are split on the
+# single-character delimiter ($1, usually a tab). Column widths auto-size to the
+# widest value, so long names no longer overflow into the next column. Pure
+# bash — no `column`, portable across macOS/Linux.
+print_table() {
+  local delim="$1" row i w ncol=0
+  local -a data widths
+  while IFS= read -r row; do
+    data+=("$row")
+    local -a cols; IFS="$delim" read -ra cols <<<"$row"
+    for ((i = 0; i < ${#cols[@]}; i++)); do
+      w=${#cols[i]}
+      if (( w > ${widths[i]:-0} )); then widths[i]=$w; fi
+    done
+    if (( ${#cols[@]} > ncol )); then ncol=${#cols[@]}; fi
+  done
+  local line
+  for row in "${data[@]}"; do
+    local -a cols; IFS="$delim" read -ra cols <<<"$row"
+    line=""
+    for ((i = 0; i < ncol; i++)); do
+      printf -v line '%s%-*s  ' "$line" "${widths[i]:-0}" "${cols[i]:-}"
+    done
+    printf '%s\n' "${line%  }"
+  done
+}
+
 # Always a fresh `docker run` — `docker start`/`restart` reuse the old config and
 # would NOT pick up .env, -e, or mount changes. A stopped container has no live
 # sessions or creds, so recreating loses nothing.
@@ -147,8 +204,11 @@ create_container() {
   exists && docker rm -f "$CONTAINER" >/dev/null
   local env_file_args=()
   [[ -f "$SELF/.env" ]] && env_file_args+=(--env-file "$SELF/.env")
+  local gitconfig_args=()
+  [[ -f "$SELF/.gitconfig" ]] && gitconfig_args+=(-v "$SELF/.gitconfig:/home/pi/.gitconfig:ro")
   mkdir -p "$SCRIPTS" "$WORKSPACE" "$PI_CONFIG/agent/skills"
   local skill_mounts; build_skill_mounts
+  local live_ws_mounts; build_live_ws_mounts
   docker run -d --name "$CONTAINER" \
     --tmpfs "$CRED_DIR:mode=0700" \
     -e AWS_REGION="$REGION" \
@@ -156,7 +216,9 @@ create_container() {
     -v "$WORKSPACE":/workspace \
     -v "$SCRIPTS":/home/pi/scripts \
     -v "$PI_CONFIG":/home/pi/.pi \
+    "${gitconfig_args[@]+"${gitconfig_args[@]}"}" \
     "${skill_mounts[@]+"${skill_mounts[@]}"}" \
+    "${live_ws_mounts[@]+"${live_ws_mounts[@]}"}" \
     "$IMAGE" >/dev/null
   init_container
 }
@@ -181,7 +243,7 @@ cmd_restart() {
 
 cmd_shell() { need_running; refresh_creds; exec docker exec -it "$CONTAINER" zsh; }
 
-cmd_refresh() { need_running; refresh_creds; echo "creds refreshed"; }
+cmd_refresh() { need_running; refresh_creds; [[ -n "$PROFILE" ]] && echo "creds refreshed"; }
 
 cmd_env() {
   [[ -f "$SELF/.env" ]] || cp "$SELF/.env.example" "$SELF/.env"
@@ -203,53 +265,89 @@ cmd_skills() {
   case "${1:-}" in
     list) local skill_mounts i; build_skill_mounts
           for ((i = 1; i < ${#skill_mounts[@]}; i += 2)); do echo "${skill_mounts[i]}"; done ;;
-    *)    exec "${EDITOR:-vi}" "$SKILLS_CONF" ;;
+    *)    [[ -f "$SKILLS_CONF" ]] || cp "$SELF/skills.conf.example" "$SKILLS_CONF" 2>/dev/null || true
+          exec "${EDITOR:-vi}" "$SKILLS_CONF" ;;
   esac
 }
 
-# Workspaces are rsync'd copies under $WORKSPACE (which is bind-mounted live at
-# /workspace), so a copy is instantly visible to the agent — no recreate. The
-# original source is never modified; agent edits land only in the copy.
-# Registry line: <uuid>\t<name>\t<source-path>.
+# Workspaces come in two modes:
+#   copy (default) — cloned under $WORKSPACE (filesystem clone where supported,
+#     e.g. macOS APFS clonefile; else a real recursive copy). $WORKSPACE is bind-mounted live at
+#     /workspace, so a new copy is visible instantly with no recreate. The source is
+#     never modified; agent edits land only in the copy. Re-adding a copy merges
+#     source changes in via rsync (copy-only files kept).
+#   live — a second bind mount (-v <src>:/workspace/<name>) layered on top of
+#     /workspace, so the agent reads/writes your real source directly. Shared and
+#     bidirectional, but no isolation: the agent can edit or delete your source.
+#     Adding/removing changes mounts, so it applies on the next 'tau restart'
+#     (running sessions are lost) — same rule as skills.conf.
+# Registry line: <uuid>\t<name>\t<source>\t<mode>  (mode omitted => copy, for
+#   backward compat with pre-existing 3-field entries).
 ws_add() {
-  local dir="" name=""
+  local dir="" name="" mode=copy
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --cd)   shift ;;                     # handled by the shell wrapper
+      --live) mode=live; shift ;;
       --name) name="${2:-}"; shift 2 ;;
       *)      dir="$1"; shift ;;
     esac
   done
   dir="${dir:-$PWD}"
-  local abs dest exist_src
+  local abs dest exist exist_src exist_mode
   abs="$(cd "$dir" 2>/dev/null && pwd)" || die "no such directory: $dir"
   name="${name:-$(basename "$abs")}"       # default: the dir's basename
   [[ "$name" == *[!a-zA-Z0-9_.-]* ]] && die "workspace name must be [a-zA-Z0-9_.-]: '$name'"
   dest="$WORKSPACE/$name"
   mkdir -p "$WORKSPACE"; touch "$WORKSPACES_FILE"
-  exist_src="$(awk -F'\t' -v n="$name" '$2==n{print $3}' "$WORKSPACES_FILE")"
-  if [[ -n "$exist_src" && "$exist_src" != "$abs" ]]; then
-    die "workspace '$name' already exists from a different source ($exist_src) — remove it or pass a different --name"
+  exist="$(awk -F'\t' -v n="$name" '$2==n{print $3"\t"($4==""?"copy":$4)}' "$WORKSPACES_FILE")"
+  exist_src="${exist%%$'\t'*}"; exist_mode="${exist##*$'\t'}"
+  if [[ -n "$exist_src" ]]; then
+    [[ "$exist_src" != "$abs" ]] && die "workspace '$name' already exists from a different source ($exist_src) — remove it or pass a different --name"
+    [[ "$exist_mode" != "$mode" ]] && die "workspace '$name' is already $exist_mode — remove it first to change mode"
   fi
-  rsync -a "$abs/" "$dest/" >&2 || die "rsync failed"
-  if [[ -z "$exist_src" ]]; then
-    local uuid; uuid="$(uuidgen | tr 'A-Z' 'a-z')"
-    printf '%s\t%s\t%s\n' "$uuid" "$name" "$abs" >> "$WORKSPACES_FILE"
-    echo "tau: added workspace $name (${uuid%%-*}) -> /workspace/$name" >&2
+  if [[ "$mode" == live ]]; then
+    if [[ -z "$exist_src" ]]; then
+      local uuid; uuid="$(gen_uuid | tr 'A-Z' 'a-z')"
+      printf '%s\t%s\t%s\t%s\n' "$uuid" "$name" "$abs" "$mode" >> "$WORKSPACES_FILE"
+      echo "tau: added live workspace $name (${uuid%%-*}) -> /workspace/$name (your real source)" >&2
+    else
+      echo "tau: live workspace $name already registered" >&2
+    fi
+    echo "tau: WARNING: --live mounts your real source read/write; the agent can edit or delete it" >&2
+    if running; then echo "tau: applies on next 'tau restart' (running sessions will be lost)" >&2
+    else echo "tau: applies on next 'tau start'" >&2; fi
+    echo "$abs"   # stdout: host source path, for the shell wrapper's --cd
   else
-    echo "tau: refreshed workspace $name -> /workspace/$name" >&2
+    if [[ -z "$exist_src" ]]; then
+      rm -rf "$dest"                       # clean target (leftover guard)
+      # Clone where the filesystem supports it (macOS APFS clonefile via `cp
+      # -c`); fall back to a plain recursive copy on Linux / non-APFS.
+      if ! cp -cR "$abs" "$dest" 2>/dev/null; then
+        rm -rf "$dest"; cp -aR "$abs" "$dest" >&2 || die "copy failed"
+      fi
+      local uuid; uuid="$(gen_uuid | tr 'A-Z' 'a-z')"
+      printf '%s\t%s\t%s\t%s\n' "$uuid" "$name" "$abs" "$mode" >> "$WORKSPACES_FILE"
+      echo "tau: added workspace $name (${uuid%%-*}) -> /workspace/$name" >&2
+    else
+      rsync -a "$abs/" "$dest/" >&2 || die "rsync failed"   # merge refresh, keeps copy-only files
+      echo "tau: refreshed workspace $name -> /workspace/$name" >&2
+    fi
+    echo "$dest"   # stdout: host path of the copy, for the shell wrapper's --cd
   fi
-  echo "$dest"   # stdout: host path of the copy, for the shell wrapper's --cd
 }
 
 ws_list() {
   { [[ -f "$WORKSPACES_FILE" && -s "$WORKSPACES_FILE" ]]; } || { echo "no workspaces"; return; }
-  local uuid name src
-  printf '%-16s  %-10s  %-22s  %s\n' NAME ID CONTAINER SOURCE
-  while IFS=$'\t' read -r uuid name src; do
-    [[ -n "$uuid" ]] || continue
-    printf '%-16s  %-10s  %-22s  %s\n' "$name" "${uuid%%-*}" "/workspace/$name" "$src"
-  done < "$WORKSPACES_FILE"
+  local uuid name src mode
+  {
+    printf 'NAME\tID\tMODE\tCONTAINER\tSOURCE\n'
+    while IFS=$'\t' read -r uuid name src mode; do
+      [[ -n "$uuid" ]] || continue
+      [[ -n "$mode" ]] || mode=copy
+      printf '%s\t%s\t%s\t%s\t%s\n' "$name" "${uuid%%-*}" "$mode" "/workspace/$name" "$src"
+    done < "$WORKSPACES_FILE"
+  } | print_table $'\t'
 }
 
 ws_lookup() {   # echo the registry line matching a name (exact) or uuid prefix, or die
@@ -264,17 +362,22 @@ ws_lookup() {   # echo the registry line matching a name (exact) or uuid prefix,
 ws_remove() {
   [[ -n "${1:-}" ]] || die "usage: tau workspace remove <name|id>"
   { [[ -f "$WORKSPACES_FILE" && -s "$WORKSPACES_FILE" ]]; } || die "no workspaces"
-  local line uuid name tmp
+  local line uuid name mode tmp
   line="$(ws_lookup "$1")"
   uuid="$(printf '%s' "$line" | cut -f1)"; name="$(printf '%s' "$line" | cut -f2)"
-  rm -rf "${WORKSPACE:?}/$name"
+  mode="$(printf '%s' "$line" | cut -f4)"; [[ -n "$mode" ]] || mode=copy
+  if [[ "$mode" == live ]]; then
+    echo "tau: unmounts $name on next 'tau restart' (source untouched)" >&2
+  else
+    rm -rf "${WORKSPACE:?}/$name"
+    echo "tau: removed $name (${uuid%%-*}) — source left untouched (copy + any agent edits deleted)" >&2
+  fi
   tmp="$(mktemp)"; awk -F'\t' -v u="$uuid" '$1!=u' "$WORKSPACES_FILE" > "$tmp" && mv "$tmp" "$WORKSPACES_FILE"
-  echo "tau: removed $name (${uuid%%-*}) — source left untouched (copy + any agent edits deleted)"
 }
 
-ws_cd() {   # print the copy's host path to stdout; the shell wrapper cds to it
+ws_cd() {   # print the workspace's host path to stdout; the shell wrapper cds to it
   { [[ -f "$WORKSPACES_FILE" && -s "$WORKSPACES_FILE" ]]; } || die "no workspaces"
-  local line name
+  local line name src mode
   if [[ -z "${1:-}" ]]; then
     [[ "$(grep -c . "$WORKSPACES_FILE")" -eq 1 ]] || die "usage: tau workspace cd <name|id>"
     line="$(grep . "$WORKSPACES_FILE" | head -1)"
@@ -282,7 +385,9 @@ ws_cd() {   # print the copy's host path to stdout; the shell wrapper cds to it
     line="$(ws_lookup "$1")"
   fi
   name="$(printf '%s' "$line" | cut -f2)"
-  printf '%s\n' "$WORKSPACE/$name"
+  src="$(printf '%s' "$line" | cut -f3)"
+  mode="$(printf '%s' "$line" | cut -f4)"; [[ -n "$mode" ]] || mode=copy
+  if [[ "$mode" == live ]]; then printf '%s\n' "$src"; else printf '%s\n' "$WORKSPACE/$name"; fi
 }
 
 cmd_workspace() {
@@ -292,7 +397,7 @@ cmd_workspace() {
     list|ls)   ws_list ;;
     remove|rm) ws_remove "$@" ;;
     cd)        ws_cd "$@" ;;
-    *) die "usage: tau workspace {add [dir] [--name NAME] [--cd]|list|remove <name|id>|cd <name|id>}" ;;
+    *) die "usage: tau workspace {add [dir] [--name NAME] [--cd] [--live]|list|remove <name|id>|cd <name|id>}" ;;
   esac
 }
 
@@ -305,11 +410,12 @@ cmd_session() {
       while [[ $# -gt 0 ]]; do
         case "$1" in
           --name) name="${2:-}"; shift 2 ;;
-          *) die "unknown flag: $1" ;;
+          -*) die "unknown flag: $1" ;;
+          *) name="$1"; shift ;;              # positional name: `tau session new foo`
         esac
       done
       refresh_creds
-      name="${name:-$(uuidgen | tr 'A-Z' 'a-z' | cut -c1-8)}"   # default: short random name
+      name="${name:-$(gen_uuid | tr 'A-Z' 'a-z' | cut -c1-8)}"   # default: short random name
       [[ "$name" == *[!a-zA-Z0-9_-]* ]] && die "session name must be [a-zA-Z0-9_-] (no . or :): '$name'"
       tx has-session -t "=$name" 2>/dev/null && die "session '$name' already exists"
       tx new-session -d -s "$name" "$PI_CMD"
@@ -321,14 +427,16 @@ cmd_session() {
       local rows
       rows="$(tx list-sessions -F '#{session_name}|#{session_created}|#{session_activity}' 2>/dev/null || true)"
       [[ -n "$rows" ]] || { echo "no active sessions"; return; }
-      printf '%-20s  %-9s  %-19s  %s\n' NAME TYPE CREATED "LAST ACTIVE"
-      while IFS='|' read -r name created activity; do
-        local type=session
-        [[ "$name" == sa-* ]] && type=subagent   # pi's subagent naming convention
-        printf '%-20s  %-9s  %-19s  %s\n' \
-          "$name" "$type" "$(date -r "$created" '+%Y-%m-%d %H:%M:%S')" \
-          "$(date -r "$activity" '+%Y-%m-%d %H:%M:%S')"
-      done <<<"$rows"
+      {
+        printf 'NAME\tTYPE\tCREATED\tLAST ACTIVE\n'
+        while IFS='|' read -r name created activity; do
+          local type=session
+          [[ "$name" == sa-* ]] && type=subagent   # pi's subagent naming convention
+          printf '%s\t%s\t%s\t%s\n' "$name" "$type" \
+            "$(fmt_epoch "$created")" \
+            "$(fmt_epoch "$activity")"
+        done <<<"$rows"
+      } | print_table $'\t'
       ;;
     kill)
       need_running

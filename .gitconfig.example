@@ -1,0 +1,13 @@
+# Git identity for the agent. Copy to .gitconfig (gitignored); tau mounts it
+# read-only at /home/pi/.gitconfig on container create.
+#
+# Prefer a dedicated agent identity so its commits are attributable. For auth,
+# use HTTPS + a scoped token from .env — the container has no SSH keys, and
+# host key paths (core.sshCommand) won't resolve inside it.
+
+[user]
+	name = my-agent
+	email = my-agent@example.com
+
+[init]
+	defaultBranch = main

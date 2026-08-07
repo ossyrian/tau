@@ -5,6 +5,8 @@
 # real work stays in the `tau` script and this wrapper just cds to what it prints.
 #
 #   echo "source $PWD/tau.fish" >> ~/.config/fish/config.fish   (run from the tau dir)
+#
+# bash / zsh users: source tau.bash instead.
 
 # Self-derive the script path from this file's location — portable, move-safe.
 set -g __tau_bin (path resolve (path dirname (status --current-filename))/tau)

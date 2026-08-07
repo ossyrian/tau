@@ -1,0 +1,11 @@
+# Host skill directories bind-mounted (live, read-write) into Pi's global
+# skills dir (/home/pi/.pi/agent/skills/<name>). Pi's edits write back here.
+# One absolute path per line.
+# '#' comments and blank lines ignored. Leading ~ expands to $HOME.
+# Edit with `tau skills`; recreate the container (tau stop && tau start) to
+# pick up adds/removes.
+#
+# Example — share skills you keep on your host machine:
+# ~/.claude/skills/voice
+# ~/.claude/skills/review-pull-request
+# ~/my-skills/some-skill

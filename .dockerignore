@@ -1,4 +1,8 @@
 .env
-workspace/
+.gitconfig
 .git/
+workspace/
+pi-config/
+skills.conf
+workspaces.conf
 *.md

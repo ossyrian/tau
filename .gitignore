@@ -1,5 +1,13 @@
-.gitconfig
+# Per-user — copy from the matching .example.
 .env
-workspace/
-pi-config/
+.gitconfig
+skills.conf
+
+# Runtime state, managed by the tau CLI.
 workspaces.conf
+workspace/*
+pi-config/*
+
+# Personal agent scripts — see scripts/README.md.
+scripts/*
+!scripts/README.md
