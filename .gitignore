@@ -1,13 +1,14 @@
-# Per-user — copy from the matching .example.
+# per-user config
 .env
 .gitconfig
 skills.conf
 
-# Runtime state, managed by the tau CLI.
+# runtime state
 workspaces.conf
-workspace/*
 pi-config/*
 
-# Personal agent scripts — see scripts/README.md.
+# live mounts that the harness has access to at runtime
 scripts/*
+workspace/*
 !scripts/README.md
+!workspace/README.md
