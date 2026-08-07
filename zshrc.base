@@ -1,0 +1,8 @@
+# Baked into the image as ~/.zshrc so a personal edit can't drop the [tau]
+# marker. Sources the personal ~/.config/tau/zshrc last, so it can override.
+
+# TAU_PROMPT_PREFIX lets the personal zshrc prepend the marker to its own PROMPT.
+export TAU_PROMPT_PREFIX='%F{magenta}[tau]%f '
+PROMPT="${TAU_PROMPT_PREFIX}"'%~ %# '
+
+[[ -r ~/.config/tau/zshrc ]] && source ~/.config/tau/zshrc

@@ -1,0 +1,3 @@
+# Personal zshrc. Seeded to ~/.tau/zshrc on first start, sourced by the tau base
+# ~/.zshrc after the [tau] prompt marker is set. Edit freely; ships blank.
+# Set PROMPT= to override the marker.

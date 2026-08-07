@@ -37,6 +37,8 @@ SKILLS_CONF="${PI_SKILLS_CONF:-$TAU_HOME/skills.conf}"   # host skill dirs to mo
 WORKSPACES_FILE="${PI_WORKSPACES_FILE:-$TAU_HOME/workspaces.conf}"   # registry: <uuid>\t<path>
 ENV_FILE="${PI_ENV_FILE:-$TAU_HOME/.env}"
 GITCONFIG_FILE="${PI_GITCONFIG:-$TAU_HOME/.gitconfig}"
+ZSHRC_FILE="${PI_ZSHRC:-$TAU_HOME/zshrc}"   # personal zshrc, sourced by the base
+VIMRC_FILE="${PI_VIMRC:-$TAU_HOME/vimrc}"    # container ~/.vimrc
 REGION="${AWS_REGION:-us-east-1}"
 PI_CMD="${PI_CMD:-pi}"                       # command that starts a Pi conversation
 CRED_DIR="/home/pi/.tau"                     # container path (tmpfs) — NOT the host TAU_HOME
@@ -230,6 +232,13 @@ seed_pi_config() {
   done
 }
 
+# Seed a dotfile ($1 host path, $2 repo .example) from its blank .example when
+# absent, so a first run has a file to bind-mount and edits survive (as .env does).
+seed_dotfile() {
+  local dst="$1" example="$SELF/$2"
+  [[ -f "$dst" || ! -f "$example" ]] || { mkdir -p "$(dirname "$dst")"; cp "$example" "$dst"; }
+}
+
 # Always a fresh `docker run` — `docker start`/`restart` reuse the old config and
 # would NOT pick up .env, -e, or mount changes. A stopped container has no live
 # sessions or creds, so recreating loses nothing.
@@ -239,6 +248,13 @@ create_container() {
   [[ -f "$ENV_FILE" ]] && env_file_args+=(--env-file "$ENV_FILE")
   local gitconfig_args=()
   [[ -f "$GITCONFIG_FILE" ]] && gitconfig_args+=(-v "$GITCONFIG_FILE:/home/pi/.gitconfig:ro")
+  # zshrc mounts to ~/.config/tau/zshrc, sourced by the image-baked base ~/.zshrc;
+  # vimrc mounts straight to ~/.vimrc. Both rw so they're tweakable in-container.
+  seed_dotfile "$ZSHRC_FILE" zshrc.example
+  seed_dotfile "$VIMRC_FILE" vimrc.example
+  local dotfile_args=()
+  [[ -f "$ZSHRC_FILE" ]] && dotfile_args+=(-v "$ZSHRC_FILE:/home/pi/.config/tau/zshrc")
+  [[ -f "$VIMRC_FILE" ]] && dotfile_args+=(-v "$VIMRC_FILE:/home/pi/.vimrc")
   mkdir -p "$SCRIPTS" "$WORKSPACE" "$SHARE" "$PI_CONFIG/agent/skills" "$PI_CONFIG/agent/treehouse"
   seed_pi_config
   local skill_mounts; build_skill_mounts
@@ -258,6 +274,7 @@ create_container() {
     -v "$SHARE":/home/pi/share \
     -v "$PI_CONFIG":/home/pi/.pi \
     "${gitconfig_args[@]+"${gitconfig_args[@]}"}" \
+    "${dotfile_args[@]+"${dotfile_args[@]}"}" \
     "${skill_mounts[@]+"${skill_mounts[@]}"}" \
     "${live_ws_mounts[@]+"${live_ws_mounts[@]}"}" \
     "$IMAGE" >/dev/null

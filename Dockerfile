@@ -10,6 +10,8 @@ RUN apt-get update && \
       curl \
       unzip \
       git \
+      vim \
+      less \
       jq \
       ca-certificates \
       locales \
@@ -110,6 +112,12 @@ RUN mkdir -p /home/pi/share
 # config (e.g. per-worktree env-file setup) persists across recreates.
 RUN mkdir -p /home/pi/.config && \
     ln -s /home/pi/.pi/agent/treehouse /home/pi/.config/treehouse
+
+# Base ~/.zshrc, baked into the image so a personal edit can't drop the [tau]
+# prompt marker it sets; it sources the user's ~/.config/tau/zshrc last. mkdir
+# the mount target so the bind-mount lands on a first run with no personal file.
+RUN mkdir -p /home/pi/.config/tau
+COPY --chown=pi:pi zshrc.base /home/pi/.zshrc
 
 # agent-managed scripts
 COPY --chown=pi:pi scripts/ /home/pi/scripts/
