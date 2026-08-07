@@ -1,9 +1,10 @@
 # Git identity for the agent. Copy to .gitconfig (gitignored); tau mounts it
 # read-only at /home/pi/.gitconfig on container create.
 #
-# Prefer a dedicated agent identity so its commits are attributable. For auth,
-# use HTTPS + a scoped token from .env — the container has no SSH keys, and
-# host key paths (core.sshCommand) won't resolve inside it.
+# Auth is HTTPS + the GITHUB_TOKEN from .env via the credential helper below —
+# the container has no SSH keys, and host key paths (core.sshCommand) won't
+# resolve inside it. The token's scope, not the identity, bounds what the
+# agent can reach on GitHub.
 
 [user]
 	name = my-agent
@@ -11,3 +12,8 @@
 
 [init]
 	defaultBranch = main
+
+# HTTPS auth from the GITHUB_TOKEN env var. Remote URLs stay clean — no token
+# persisted in .git/config. gh reads the same var directly.
+[credential "https://github.com"]
+	helper = "!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f"

@@ -132,8 +132,33 @@ tau refresh    # Re-push fresh creds without restart
 | `~/.pi/agent/` | ✅ Yes | Config, skills, models (host bind-mount) |
 | `/workspace/` | ✅ Yes | Project copies and live mounts (host bind-mount) |
 | `~/scripts/` | ✅ Yes | Shell scripts (host bind-mount) |
+| `~/.treehouse/` | ✅ Yes | Treehouse worktree pools (named Docker volume `tau-treehouse`) |
+| `~/.no-mistakes/` | ✅ Yes | no-mistakes state: gate repos, runs, SQLite (named volume `tau-nm-home`) |
 | `~/.tau/` | ❌ No | AWS credentials (tmpfs, wiped on recreate) |
 | `/tmp/`, `/home/pi` (rest) | ❌ No | Lost on restart |
+
+A restart kills any in-flight no-mistakes pipeline run (crash recovery marks it
+failed). Check `no-mistakes axi status` before restarting.
+
+## Git, GitHub, and Shipping Work
+
+The container has real git access, authenticated **as the user**: HTTPS + the
+`GITHUB_TOKEN` PAT from `.env`, via the credential helper in the mounted
+`~/.gitconfig`. `gh` reads the same token. There are no SSH keys.
+
+The workflow:
+
+1. Clone with plain `git clone https://github.com/org/repo` (auth is automatic).
+2. Use **treehouse** for pooled, disposable worktrees — pool off container-local
+   clones only. Hook config lives at `~/.pi/agent/treehouse/config.toml`
+   (persistent, host-editable at `pi-config/agent/treehouse/`).
+3. Ship through **no-mistakes**: `no-mistakes init` once per repo, then
+   `no-mistakes axi run --intent "..."` from a branch. The run validates
+   (review/test/docs/lint), pushes, opens a PR, and watches CI. The agent stops at
+   `outcome: checks-passed` — the user reviews and merges the PR. The `/no-mistakes`
+   skill (installed into Pi's skills by `init`) is the driving guide.
+
+Enforcement is at GitHub — PAT scope plus branch protection — not in the container.
 
 ## Skills and Extensions
 

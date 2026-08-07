@@ -1,0 +1,16 @@
+# Treehouse user-level config, symlinked into the container at
+# ~/.config/treehouse/config.toml (the only place treehouse reads hooks from —
+# repo-level treehouse.toml hooks are ignored for safety).
+#
+# Lives in pi-config/ so it persists across container recreates and is
+# editable from the host.
+
+# Max worktrees per pool.
+max_trees = 8
+
+# Lifecycle hooks run sequentially in the worktree dir via /bin/sh -c.
+# Failures are logged but don't fail the operation. Typical use: seed env
+# files / install deps into a fresh worktree.
+# [hooks]
+# post_create = ["cp ../../.env .env 2>/dev/null || true"]
+# pre_destroy = []

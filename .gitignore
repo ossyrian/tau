@@ -5,10 +5,42 @@ skills.conf
 
 # runtime state
 workspaces.conf
-pi-config/*
 
 # live mounts that the harness has access to at runtime
 scripts/*
 workspace/*
 !scripts/README.md
 !workspace/README.md
+
+# pi-config is mostly runtime state + user customization, but tau-standard
+# functionality (skills, extensions, seeded config) ships with the repo.
+# Ladder of negations: a parent dir must be un-ignored before its children can be.
+pi-config/*
+!pi-config/agent
+pi-config/agent/*
+
+# tau-standard skills (user-added skills stay ignored)
+!pi-config/agent/skills
+pi-config/agent/skills/*
+!pi-config/agent/skills/tau
+!pi-config/agent/skills/tau-runtime
+!pi-config/agent/skills/tau-git-shipping
+!pi-config/agent/skills/subagent-sessions
+!pi-config/agent/skills/glossary-maintenance
+
+# tau-standard extensions (user-added ones — status lines etc. — stay ignored)
+!pi-config/agent/extensions
+pi-config/agent/extensions/*
+!pi-config/agent/extensions/tau-awareness.ts
+!pi-config/agent/extensions/git-guard.ts
+!pi-config/agent/extensions/glossary-awareness.ts
+!pi-config/agent/extensions/scripts-awareness.ts
+!pi-config/agent/extensions/todos.ts
+!pi-config/agent/extensions/workspace-tools
+!pi-config/agent/extensions/subagent-sessions
+
+# seeded treehouse config (hooks are commented examples; user edits are theirs
+# to commit or not)
+!pi-config/agent/treehouse
+
+.DS_Store

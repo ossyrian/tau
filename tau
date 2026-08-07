@@ -206,11 +206,17 @@ create_container() {
   [[ -f "$SELF/.env" ]] && env_file_args+=(--env-file "$SELF/.env")
   local gitconfig_args=()
   [[ -f "$SELF/.gitconfig" ]] && gitconfig_args+=(-v "$SELF/.gitconfig:/home/pi/.gitconfig:ro")
-  mkdir -p "$SCRIPTS" "$WORKSPACE" "$PI_CONFIG/agent/skills"
+  mkdir -p "$SCRIPTS" "$WORKSPACE" "$PI_CONFIG/agent/skills" "$PI_CONFIG/agent/treehouse"
   local skill_mounts; build_skill_mounts
   local live_ws_mounts; build_live_ws_mounts
+  # Named volumes for treehouse pools and no-mistakes state (NM_HOME): a new
+  # persistence class — survives recreate like the bind mounts, but lives in
+  # Docker, not the host tree. SQLite (no-mistakes) is unreliable on virtiofs
+  # bind mounts; worktree gitdir pointers must stay container-local anyway.
   docker run -d --name "$CONTAINER" \
     --tmpfs "$CRED_DIR:mode=0700" \
+    -v tau-treehouse:/home/pi/.treehouse \
+    -v tau-nm-home:/home/pi/.no-mistakes \
     -e AWS_REGION="$REGION" \
     "${env_file_args[@]+"${env_file_args[@]}"}" \
     -v "$WORKSPACE":/workspace \
