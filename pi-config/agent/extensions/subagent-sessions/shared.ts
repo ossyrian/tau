@@ -105,12 +105,68 @@ export function sanitizeTmuxName(s: string): string {
 
 // --- Beacon (the child writes, the parent reads) ---
 
-export type BeaconEventType = "ready" | "busy" | "settled" | "shutdown";
+/**
+ * Beacon event stream. The child appends one JSON line per event; the parent
+ * reads them to track status, render digests, and match alert patterns — never
+ * by screen-scraping the pane.
+ *
+ * `tool` and `assistant` carry mid-run signal so the parent can watch a long
+ * run without pulling the whole transcript: a short tool summary + truncated
+ * output snippet, and capped assistant text. `settled.text` stays full and
+ * uncapped because it is the final answer the parent explicitly asked for.
+ */
+export type BeaconEventType =
+	| "ready"
+	| "busy"
+	| "settled"
+	| "shutdown"
+	| "tool"
+	| "assistant";
+
 export interface BeaconEvent {
 	event: BeaconEventType;
 	seq?: number;
 	ts: number;
 	text?: string;
+	/** `tool`: short, human-readable rendering of the call (command, path, query). */
+	summary?: string;
+	/** `tool`: tool name. */
+	toolName?: string;
+	/** `tool`: whether the tool result was an error. */
+	isError?: boolean;
+	/** `tool`: truncated output text, for alert matching and digests. */
+	snippet?: string;
+}
+
+/** Truncate a string to `n` chars, marking the cut so consumers know it is partial. */
+export function cap(s: string, n: number): string {
+	if (s.length <= n) return s;
+	return s.slice(0, n) + "\n…[truncated]";
+}
+
+/** Write `text` to a temp file under STATE_DIR and return the path, or undefined on failure. */
+export function spillToFile(text: string, tag: string): string | undefined {
+	ensureStateDir();
+	const file = path.join(STATE_DIR, `spill-${tag}-${Date.now()}-${genId()}.txt`);
+	try {
+		fs.writeFileSync(file, text, { encoding: "utf8" });
+		return file;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Keep the parent's context lean: if `text` fits within `n` chars, return it as-is.
+ * Otherwise write the full text to a temp file under STATE_DIR and return a preview
+ * plus the path, so the parent can grep the file when it actually needs the rest
+ * instead of carrying the whole payload in-context.
+ */
+export function spill(text: string, n: number, tag: string): string {
+	if (text.length <= n) return text;
+	const file = spillToFile(text, tag);
+	if (!file) return cap(text, n);
+	return `${text.slice(0, n)}\n…[truncated — ${text.length} chars total; full output: ${file}]`;
 }
 
 export function beaconPath(id: string): string {
@@ -184,6 +240,89 @@ export function saveRegistry(records: SubagentRecord[]): void {
 	fs.writeFileSync(REGISTRY_FILE, JSON.stringify(records, null, 2), { encoding: "utf8" });
 }
 
+// --- In-memory registry (backed by REGISTRY_FILE; shared so the alert poller
+// and the panel UI can read live subagents without importing the manager) ---
+
+const registry = new Map<string, SubagentRecord>();
+
+export function getRegistry(): Map<string, SubagentRecord> {
+	return registry;
+}
+
+/** Load persisted records into the in-memory map (call once on manager load/reload). */
+export function hydrateRegistry(): void {
+	for (const r of loadRegistry()) registry.set(r.id, r);
+}
+
+export function upsertRecord(r: SubagentRecord): void {
+	registry.set(r.id, r);
+	saveRegistry([...registry.values()]);
+}
+
+export function removeRecord(id: string): void {
+	registry.delete(id);
+	saveRegistry([...registry.values()]);
+}
+
+export function findByIdOrLabel(target: string): SubagentRecord | undefined {
+	const lower = target.toLowerCase();
+	for (const r of registry.values()) {
+		if (r.id.toLowerCase() === lower) return r;
+	}
+	for (const r of registry.values()) {
+		if (r.label && r.label.toLowerCase() === lower) return r;
+	}
+	return undefined;
+}
+
+export function labelOf(r: SubagentRecord): string {
+	return r.label ? `${r.label} (${r.id})` : r.id;
+}
+
+/** Tear down a subagent: kill its tmux session and drop registry/beacon/scratch state. */
+export function destroySubagent(r: SubagentRecord): void {
+	try {
+		tmux(["kill-session", "-t", r.tmuxSession]);
+	} catch {
+		/* session may already be gone */
+	}
+	removeRecord(r.id);
+	removeBeacon(r.id);
+	cleanupScratchFiles(r.id);
+}
+
+/** Drop registry entries whose tmux session is gone, and refresh status from beacons. */
+export function reconcile(): void {
+	const live: SubagentRecord[] = [];
+	for (const r of registry.values()) {
+		if (!sessionExists(r.tmuxSession)) {
+			removeBeacon(r.id);
+			cleanupScratchFiles(r.id);
+			continue;
+		}
+		const evs = readBeaconEvents(r.id);
+		const last = evs[evs.length - 1];
+		if (last?.event === "shutdown") {
+			removeBeacon(r.id);
+			cleanupScratchFiles(r.id);
+			continue;
+		}
+		if (last?.event === "ready" || last?.event === "settled") {
+			r.status = "idle";
+			if (last.event === "settled") {
+				r.settledCount = evs.filter((e) => e.event === "settled").length;
+				r.lastText = last.text;
+			}
+		} else if (last?.event === "busy") {
+			r.status = "busy";
+		}
+		live.push(r);
+	}
+	registry.clear();
+	for (const r of live) registry.set(r.id, r);
+	saveRegistry(live);
+}
+
 export function inputPayloadPath(id: string, nonce: number): string {
 	return path.join(STATE_DIR, `input-${id}-${nonce}.md`);
 }
@@ -208,4 +347,100 @@ export function cleanupScratchFiles(id: string): void {
 			}
 		}
 	}
+}
+
+// --- Alert patterns (regexes the parent watches subagent output for) ---
+
+export const ALERTS_FILE = path.join(STATE_DIR, "alerts.json");
+
+export interface AlertPattern {
+	id: string;
+	/** Regex source. */
+	pattern: string;
+	/** Regex flags (e.g. "i"). */
+	flags: string;
+	label?: string;
+	/** Optional subagent id/label filter; when set, the alert only watches that one. */
+	target?: string;
+	/** Min gap between firings for the same (pattern, subagent), in ms. */
+	cooldownMs: number;
+	createdAt: number;
+}
+
+const alerts = new Map<string, AlertPattern>();
+
+export function getAlerts(): AlertPattern[] {
+	return [...alerts.values()];
+}
+
+export function getAlert(id: string): AlertPattern | undefined {
+	return alerts.get(id);
+}
+
+export function loadAlerts(): void {
+	alerts.clear();
+	try {
+		const raw = fs.readFileSync(ALERTS_FILE, "utf8");
+		const data = JSON.parse(raw);
+		if (Array.isArray(data)) {
+			for (const p of data) {
+				if (p && typeof p.id === "string") alerts.set(p.id, p as AlertPattern);
+			}
+		}
+	} catch {
+		/* no alerts file yet */
+	}
+}
+
+export function saveAlerts(): void {
+	ensureStateDir();
+	fs.writeFileSync(ALERTS_FILE, JSON.stringify([...alerts.values()], null, 2), { encoding: "utf8" });
+}
+
+export interface AddAlertInput {
+	pattern: string;
+	flags?: string;
+	label?: string;
+	target?: string;
+	cooldownMs?: number;
+}
+
+/** Validate, store, and persist a new alert pattern. Throws on an invalid regex. */
+export function addAlert(input: AddAlertInput): AlertPattern {
+	const flags = input.flags ?? "";
+	// Compile once to reject invalid patterns before they are stored.
+	new RegExp(input.pattern, flags);
+	const id = genId();
+	const ap: AlertPattern = {
+		id,
+		pattern: input.pattern,
+		flags,
+		label: input.label,
+		target: input.target,
+		cooldownMs: input.cooldownMs ?? 30000,
+		createdAt: Date.now(),
+	};
+	alerts.set(id, ap);
+	saveAlerts();
+	return ap;
+}
+
+export function removeAlert(id: string): boolean {
+	const had = alerts.delete(id);
+	if (had) saveAlerts();
+	return had;
+}
+
+export function removeAlertsByPattern(pattern: string): number {
+	const ids = [...alerts.values()].filter((a) => a.pattern === pattern).map((a) => a.id);
+	for (const id of ids) alerts.delete(id);
+	if (ids.length) saveAlerts();
+	return ids.length;
+}
+
+export function clearAlerts(): number {
+	const n = alerts.size;
+	alerts.clear();
+	saveAlerts();
+	return n;
 }

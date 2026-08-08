@@ -13,16 +13,22 @@ You have real git access. You commit and push **as the user** — auth is HTTPS 
 
 ## How work ships
 
-1. **Clone** with plain `git clone https://github.com/org/repo` into `/workspace/` (auth is automatic). Clones outside a mounted path are wiped on restart.
-2. **Worktrees**: for parallel or disposable working copies, use **treehouse** (`treehouse` — pooled git worktrees; `treehouse get --lease --json` for scripted use). Pool off a container-local clone, never off a repo whose `.git` points at a host path. Hook config lives at `~/.pi/agent/treehouse/config.toml` (persistent).
-3. **Ship through no-mistakes**, not by pushing straight to `origin`. In an initialized repo (`no-mistakes init`, once per repo): commit on a branch, then
+When the user asks you to do work in a git repo, do these three setup steps **before writing any code**, in order:
+
+1. **Lease a treehouse worktree.** Don't work directly in the clone. Use **treehouse** for a pooled, disposable working copy: `treehouse get --lease --json` (scripted) or `treehouse` interactively. Pool off a container-local clone in `/workspace/` (clone with plain `git clone https://github.com/org/repo` — auth is automatic; clones outside a mounted path are wiped on restart), never off a repo whose `.git` points at a host path. Hook config lives at `~/.pi/agent/treehouse/config.toml` (persistent).
+2. **Initialize no-mistakes.** Run `no-mistakes init` in the repo — idempotent, safe to run if already initialized. This is what lets you ship through the gate and installs the `/no-mistakes` skill.
+3. **Ensure pre-commit is available.** If the repo has a `.pre-commit-config.yaml`, activate the hooks in the worktree. First check `pre-commit` is on PATH — it's installed in the image (`uv tool install pre-commit`); if it's missing, run `uv tool install pre-commit`. Then run `pre-commit install` in the worktree. If the repo has no `.pre-commit-config.yaml`, skip this — don't add one unless the user asks.
+
+Then do the work and ship it:
+
+4. **Ship through no-mistakes**, not by pushing straight to `origin`. Commit on a branch, then
 
    ```sh
-   no-mistakes axi run --intent "<the user's goal, verbatim and complete>"
+   no-mistakes axi run --skip=ci --intent "<the user's goal, verbatim and complete>"
    ```
 
-   Answer gates with `no-mistakes axi respond`. The run ends at `outcome: checks-passed` — a PR is open and CI is green. **That is your stopping point: tell the user the PR is ready. Never merge.** The `/no-mistakes` skill has the full driving guide.
-4. Direct `git push origin` is for cases where the gate genuinely doesn't apply (e.g. pushing to a scratch repo the user named). Default to the gate for anything that will become a PR.
+   **Skip CI for now** — pass `--skip=ci` on every run. Answer gates with `no-mistakes axi respond`. The run ends at `outcome: checks-passed` with a PR open (CI skipped). **That is your stopping point: tell the user the PR is ready. Never merge.** The `/no-mistakes` skill has the full driving guide.
+5. Direct `git push origin` is for cases where the gate genuinely doesn't apply (e.g. pushing to a scratch repo the user named). Default to the gate for anything that will become a PR.
 
 ## Gate etiquette
 

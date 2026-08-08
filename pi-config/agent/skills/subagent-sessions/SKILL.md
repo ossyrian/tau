@@ -15,13 +15,16 @@ The user sometimes calls this workflow "subagent". Existing skills (e.g. the voi
 |------|--------------|
 | `subagent_run` | One-shot: create an ephemeral subagent, send one task, wait for the response, destroy it. Returns the response. |
 | `subagent_create` | Start a persistent subagent and keep it alive. Returns its id. |
-| `subagent_send` | Send a message to a session (by id or label). Waits for the response by default and returns it. |
+| `subagent_send` | Send a message to a session (by id or label). Waits for the response by default and returns it. `steer: true` interrupts a running subagent instead of waiting for it to idle. |
 | `subagent_wait` | Block until the current run finishes; return the latest response. Use after a `wait: false` send. |
 | `subagent_read` | Return the latest response without waiting. `raw: true` returns a tmux pane snapshot for debugging. |
 | `subagent_list` | List managed sessions with id, label, status, cwd. |
 | `subagent_destroy` | Kill a session (kills its tmux session). `all: true` destroys every session. |
+| `subagent_alert_add` | Register a regex watched against live subagent output; fires a pointed alert into your context on match with a steer hint. |
+| `subagent_alert_remove` | Deregister an alert by id, by pattern, or all. Safe to call while subagents run. |
+| `subagent_alert_list` | List registered alerts (id, pattern, flags, label, target, cooldown). |
 
-`subagent_send` returns the subagent's final response text when `wait: true` (the default). That text is captured from the subagent directly, not screen-scraped, so it is complete even if long.
+`subagent_send` returns the subagent's final response text when `wait: true` (the default). That text is the subagent's settled answer, captured directly from its beacon stream — not screen-scraped. A large answer is truncated inline and the full text spilled to a temp file (the reply names the path); read or grep that file when you need the rest, rather than carrying it all in context.
 
 ## Piping your own output to a subagent
 
@@ -74,7 +77,39 @@ subagent_destroy { target: "voice" }   # when truly done
 
 - `subagent_send` with `wait: true` (default) returns the response directly.
 - After a `wait: false` send, call `subagent_wait` (blocks) or `subagent_read` (non-blocking, returns the latest response).
-- If a response looks empty or wrong, `subagent_read { target, raw: true }` shows the raw tmux pane so you can see what the subagent actually rendered.
+- The default read path is **pointed**, not a screen dump: the extension reconstructs a digest from the subagent's beacon events (tool calls with one-line summaries, assistant text snippets, settled answers) so only signal reaches your context, not rendered UI or long thinking runs.
+- `subagent_read { target, raw: true }` is a **debug escape hatch** — it returns the raw tmux pane. Use it only when a digest looks empty or wrong and you need to see what the subagent actually rendered.
+
+## Steering and alerting
+
+Blocking sends (`wait: true`) are the default: you get result causality for free and no re-engagement cost. Two overlays handle the cases blocking can't:
+
+**Steering** — `subagent_send { target, text, steer: true }` interrupts a running subagent mid-run instead of waiting for it to idle, then waits for the *next* settled answer so you still get the corrected result back. Use it to course-correct a subagent you can see is going wrong.
+
+**Alerts** — register regexes that watch live subagent output and fire a pointed notification into your context on match, so you can catch a subagent losing the plot without polling it yourself:
+
+```
+subagent_alert_add { pattern: "rate limit|429|too many requests", flags: "i", label: "rate-limited", cooldownMs: 30000 }
+subagent_alert_add { pattern: "Permission denied", target: "build-helper" }
+subagent_alert_remove { pattern: "rate limit" }   # by source, while it runs
+subagent_alert_remove { all: true }
+```
+
+- The poller tests only text-bearing events (tool snippets, assistant text, settled text) against your patterns — non-matching output never enters your context.
+- Each alert injects a minimal two-line note: which subagent and alert tripped, a short slice of the matched text, and a ready steer command. You set the alert, so it doesn't re-explain — a long match spills to a temp file whose path is in the note (grep it if you need more). Not a transcript.
+- Per-(pattern, subagent) `cooldownMs` (default 30000) prevents repeat spam for the same signal.
+- Patterns can be added and removed **while subagents run** — they take effect on the next poll tick. Register one, let it run in the background, remove it once it has served its purpose.
+- `target` (id or label) scopes an alert to one subagent; omit it to watch all of them.
+
+## The `/panels` viewer
+
+`/panels` (or `ctrl+alt+v`) opens one vim-ish modal that cycles through three panels so you can survey everything at a glance without leaving your session:
+
+- **Plans** — your `write_todos` plans, reconstructed from the session branch (same source as the todos extension). `j/k` move, `g/G` jump to top/bottom.
+- **Subagents** — live sessions with status, kind, settled count, cwd, and the last few beacon events for the selection.
+- **Alerts** — registered patterns; `d` removes the selected one.
+
+Keys: `h/l` (or `tab`/`shift+tab`) switch panels, `j/k` move within, `g/G` top/bottom, `d` acts on the selection (destroy subagent / remove alert), `r` refreshes, `q`/`Esc` returns to insert mode. A 1s tick keeps Subagents and Alerts current while open.
 
 ## Caveats
 

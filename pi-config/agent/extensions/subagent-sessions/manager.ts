@@ -23,36 +23,43 @@ import { Type } from "typebox";
 import * as fs from "node:fs";
 import {
 	STATE_DIR,
+	type AlertPattern,
 	type BeaconEvent,
 	type SubagentRecord,
+	addAlert,
+	cap,
+	clearAlerts,
 	cleanupScratchFiles,
+	destroySubagent,
 	ensureStateDir,
+	findByIdOrLabel,
 	genId,
+	getAlerts,
+	getRegistry,
+	hydrateRegistry,
 	inputPayloadPath,
 	isTmuxAvailable,
-	loadRegistry,
-	sessionExists,
+	labelOf,
 	readBeaconEvents,
+	reconcile,
+	removeAlert,
+	removeAlertsByPattern,
 	removeBeacon,
+	removeRecord,
 	sanitizeTmuxName,
-	saveRegistry,
-	systemPromptPath,
+	sessionExists,
 	shellQuote,
+	spill,
+	systemPromptPath,
 	tmux,
+	upsertRecord,
 } from "./shared.ts";
+import { forgetSubagent } from "./alerts.ts";
+import { registerPanel } from "./panel.ts";
 
-// --- in-memory registry (backed by REGISTRY_FILE so it survives /reload) ---
-
-const registry = new Map<string, SubagentRecord>();
-
-function upsertRecord(r: SubagentRecord): void {
-	registry.set(r.id, r);
-	saveRegistry([...registry.values()]);
-}
-function removeRecord(id: string): void {
-	registry.delete(id);
-	saveRegistry([...registry.values()]);
-}
+// Live subagent registry lives in shared.ts so the alert poller and panel UI
+// can read it without a circular import. `registry` here is a direct reference.
+const registry = getRegistry();
 
 // per-subagent async lock so concurrent tool calls on the same session serialize
 class KeyedLock {
@@ -71,49 +78,6 @@ class KeyedLock {
 	}
 }
 const lock = new KeyedLock();
-
-function findByIdOrLabel(target: string): SubagentRecord | undefined {
-	const lower = target.toLowerCase();
-	for (const r of registry.values()) {
-		if (r.id.toLowerCase() === lower) return r;
-	}
-	for (const r of registry.values()) {
-		if (r.label && r.label.toLowerCase() === lower) return r;
-	}
-	return undefined;
-}
-
-/** Drop registry entries whose tmux session is gone, and refresh status from beacons. */
-function reconcile(): void {
-	const live: SubagentRecord[] = [];
-	for (const r of registry.values()) {
-		if (!sessionExists(r.tmuxSession)) {
-			removeBeacon(r.id);
-			cleanupScratchFiles(r.id);
-			continue;
-		}
-		const evs = readBeaconEvents(r.id);
-		const last = evs[evs.length - 1];
-		if (last?.event === "shutdown") {
-			removeBeacon(r.id);
-			cleanupScratchFiles(r.id);
-			continue;
-		}
-		if (last?.event === "ready" || last?.event === "settled") {
-			r.status = "idle";
-			if (last.event === "settled") {
-				r.settledCount = evs.filter((e) => e.event === "settled").length;
-				r.lastText = last.text;
-			}
-		} else if (last?.event === "busy") {
-			r.status = "busy";
-		}
-		live.push(r);
-	}
-	registry.clear();
-	for (const r of live) registry.set(r.id, r);
-	saveRegistry(live);
-}
 
 // --- polling helpers ---
 
@@ -301,10 +265,16 @@ async function sendText(
 	wait: boolean,
 	timeoutMs: number,
 	signal?: AbortSignal,
+	steer = false,
 ): Promise<SendResult> {
-	const idle = await waitForIdle(r, 30000, signal);
-	if (idle === "dead") throw new Error(`Subagent ${labelOf(r)} is gone.`);
-	if (idle === "timeout") throw new Error(`Subagent ${labelOf(r)} still busy after 30s; retry later.`);
+	// Steering interrupts a running subagent instead of waiting for it to go
+	// idle first. We still wait for the *next* settle so the orchestrator gets
+	// the steered response back.
+	if (!steer) {
+		const idle = await waitForIdle(r, 30000, signal);
+		if (idle === "dead") throw new Error(`Subagent ${labelOf(r)} is gone.`);
+		if (idle === "timeout") throw new Error(`Subagent ${labelOf(r)} still busy after 30s; retry later.`);
+	}
 
 	const settledBefore = readBeaconEvents(r.id).filter((e) => e.event === "settled").length;
 	const { inputPath } = sendKeysToPane(r, text);
@@ -340,32 +310,48 @@ function readOutput(r: SubagentRecord, raw: boolean): string {
 		try {
 			return tmux(["capture-pane", "-t", r.paneId, "-p", "-S", "-500"]);
 		} catch {
-			return "";
+			return "(unavailable)";
 		}
 	}
-	const settled = readBeaconEvents(r.id).filter((e) => e.event === "settled");
+	const evs = readBeaconEvents(r.id);
+	const settled = evs.filter((e) => e.event === "settled");
 	const last = settled[settled.length - 1];
 	if (last?.text) return last.text;
-	try {
-		return tmux(["capture-pane", "-t", r.paneId, "-p", "-S", "-500"]);
-	} catch {
-		return "";
+	return renderDigest(r, evs);
+}
+
+/** Pointed, context-light summary of recent activity, used when no settled
+ * response exists yet — a replacement for screen-scraping the pane. */
+function renderDigest(r: SubagentRecord, evs: BeaconEvent[]): string {
+	const lines = [`[${labelOf(r)} — ${r.status}] recent activity:`];
+	for (const e of evs.slice(-12)) {
+		lines.push("  " + digestLine(e));
+	}
+	return lines.join("\n");
+}
+
+function digestLine(e: BeaconEvent): string {
+	switch (e.event) {
+		case "ready":
+			return "ready";
+		case "busy":
+			return "busy";
+		case "settled":
+			return `settled: ${cap(e.text ?? "", 300)}`;
+		case "assistant":
+			return `said: ${cap(e.text ?? "", 300)}`;
+		case "tool":
+			return `${e.isError ? "✗" : "•"} ${e.toolName}: ${cap(e.summary ?? "", 120)}${e.snippet ? " — " + cap(e.snippet, 160) : ""}`;
+		case "shutdown":
+			return "shutdown";
+		default:
+			return e.event;
 	}
 }
 
 function destroySession(r: SubagentRecord): void {
-	try {
-		tmux(["kill-session", "-t", r.tmuxSession]);
-	} catch {
-		/* session may already be gone */
-	}
-	removeRecord(r.id);
-	removeBeacon(r.id);
-	cleanupScratchFiles(r.id);
-}
-
-function labelOf(r: SubagentRecord): string {
-	return r.label ? `${r.label} (${r.id})` : r.id;
+	destroySubagent(r);
+	forgetSubagent(r.id);
 }
 
 // --- target resolution (the "which one?" behavior) ---
@@ -421,8 +407,19 @@ async function resolveTarget(
 
 // --- tool result helpers ---
 
+/** Cap for a subagent's final answer before it lands in the parent's context.
+ * Generous — the parent asked for this, so keep the body inline until it gets
+ * large, then spill the full text to a file and hand back a preview + path. */
+const OUTPUT_CAP = 6000;
+
 function ok(text: string, details: Record<string, unknown> = {}) {
 	return { content: [{ type: "text" as const, text }], details };
+}
+
+/** Return a subagent's output, spilling to a temp file if it's too large to keep
+ * inline. Use for every path that hands subagent-produced text back to the parent. */
+function okOutput(text: string, details: Record<string, unknown> = {}) {
+	return ok(spill(text, OUTPUT_CAP, `out-${String(details.id ?? "x")}`), details);
 }
 function err(text: string, details: Record<string, unknown> = {}) {
 	return { content: [{ type: "text" as const, text }], details, isError: true };
@@ -468,6 +465,12 @@ const SendParams = Type.Object({
 	createIfMissing: Type.Optional(
 		Type.Boolean({ description: "If no target given and none exist, create a fresh persistent one. Default true." }),
 	),
+	steer: Type.Optional(
+		Type.Boolean({
+			description:
+				"Interrupt and steer a running subagent instead of waiting for it to idle first. Use to correct a subagent flagged by an alert that is losing the plot. Default false.",
+		}),
+	),
 });
 
 const WaitParams = Type.Object({
@@ -501,11 +504,36 @@ const RunParams = Type.Object({
 	),
 });
 
+const AlertAddParams = Type.Object({
+	pattern: Type.String({
+		description:
+			"Regex to watch for in subagent output (tool snippets, assistant text, settled text). Fires an alert into your context on match.",
+	}),
+	flags: Type.Optional(Type.String({ description: "Regex flags, e.g. 'i'. Default none." })),
+	label: Type.Optional(Type.String({ description: "Human-readable name shown in the alert and /panels." })),
+	target: Type.Optional(
+		Type.String({
+			description: "Optional subagent id or label to watch. Omit to watch all subagents." }),
+	),
+	cooldownMs: Type.Optional(
+		Type.Number({
+			description: "Min gap between firings for the same subagent, in ms. Default 30000." }),
+	),
+});
+
+const AlertRemoveParams = Type.Object({
+	id: Type.Optional(Type.String({ description: "Alert id returned by subagent_alert_add." })),
+	pattern: Type.Optional(
+		Type.String({ description: "Remove every alert whose regex source equals this. Use when you don't have the id." }),
+	),
+	all: Type.Optional(Type.Boolean({ description: "Remove every alert." })),
+});
+
 // --- registration ---
 
 export function registerManager(pi: ExtensionAPI): void {
 	// load the persisted registry into memory (no tmux calls at load time)
-	for (const r of loadRegistry()) registry.set(r.id, r);
+	hydrateRegistry();
 
 	pi.registerTool({
 		name: "subagent_create",
@@ -562,17 +590,23 @@ export function registerManager(pi: ExtensionAPI): void {
 			return await lock.run(r.id, async () => {
 				try {
 					const wait = params.wait ?? true;
-					const res = await sendText(r, params.text, wait, params.timeoutMs ?? 180000, signal);
+					const res = await sendText(
+						r,
+						params.text,
+						wait,
+						params.timeoutMs ?? 180000,
+						signal,
+						params.steer === true,
+					);
 					if (!wait) return ok(`Sent to ${labelOf(r)}.`, { id: r.id, label: r.label });
 					const text = res.text ?? "(no output)";
 					if (res.timedOut) {
-						return err(`Timed out waiting for ${labelOf(r)}. Partial response:\n\n${text}`, {
-							id: r.id,
-							label: r.label,
-							timedOut: true,
-						});
+						return err(
+							`Timed out waiting for ${labelOf(r)}. Partial response:\n\n${spill(text, OUTPUT_CAP, `out-${r.id}`)}`,
+							{ id: r.id, label: r.label, timedOut: true },
+						);
 					}
-					return ok(text, { id: r.id, label: r.label });
+					return okOutput(text, { id: r.id, label: r.label });
 				} catch (e: any) {
 					return err(e.message, { id: r.id, label: r.label });
 				}
@@ -609,7 +643,7 @@ export function registerManager(pi: ExtensionAPI): void {
 				if (idle === "dead") return err(`Subagent ${labelOf(r)} is gone.`);
 				if (idle === "idle" && readBeaconEvents(r.id).filter((e) => e.event === "settled").length === settledBefore) {
 					// already idle with no new run to wait for
-					return ok(readOutput(r, false) ?? "(no output)", { id: r.id, label: r.label });
+					return okOutput(readOutput(r, false) ?? "(no output)", { id: r.id, label: r.label });
 				}
 				const ok_ = await waitForBeacon(
 					r.id,
@@ -625,7 +659,7 @@ export function registerManager(pi: ExtensionAPI): void {
 				r.status = "idle";
 				upsertRecord(r);
 				if (!ok_) return err(`Timed out waiting for ${labelOf(r)}.`, { id: r.id, timedOut: true });
-				return ok(last?.text ?? "(no output)", { id: r.id, label: r.label });
+				return okOutput(last?.text ?? "(no output)", { id: r.id, label: r.label });
 			});
 		},
 	});
@@ -640,7 +674,7 @@ export function registerManager(pi: ExtensionAPI): void {
 			const r = findByIdOrLabel(params.target);
 			if (!r) return err(`No subagent session matching "${params.target}".`);
 			if (!sessionExists(r.tmuxSession)) { destroySession(r); return err(`Subagent "${params.target}" is gone.`); }
-			return ok(readOutput(r, params.raw === true), { id: r.id, label: r.label });
+			return okOutput(readOutput(r, params.raw === true), { id: r.id, label: r.label });
 		},
 	});
 
@@ -721,9 +755,12 @@ export function registerManager(pi: ExtensionAPI): void {
 				);
 				const text = res.text ?? "(no output)";
 				if (res.timedOut) {
-					return err(`Timed out. Partial response:\n\n${text}`, { id: r.id, timedOut: true });
+					return err(`Timed out. Partial response:\n\n${spill(text, OUTPUT_CAP, `out-${r.id}`)}`, {
+						id: r.id,
+						timedOut: true,
+					});
 				}
-				return ok(text, { id: r.id, label: r.label });
+				return okOutput(text, { id: r.id, label: r.label });
 			} catch (e: any) {
 				return err(e.message, { id: r.id });
 			} finally {
@@ -757,6 +794,83 @@ export function registerManager(pi: ExtensionAPI): void {
 					return `${lbl}(${r.id}) [${r.status}] ${r.persistent ? "persistent" : "ephemeral"} cwd=${r.cwd}`;
 				});
 			ctx.ui.notify(rows.join("\n"), "info");
+		},
+	});
+
+	registerPanel(pi);
+
+	pi.registerTool({
+		name: "subagent_alert_add",
+		label: "Subagent: add alert",
+		description:
+			"Register a regex that watches live subagent output (tool snippets, assistant text, settled text) and fires a pointed alert into your context on match, with a steer hint — so you can correct a subagent that is losing the plot without waiting for it to finish. Patterns can be added and removed while subagents run. Use cooldownMs to avoid spam.",
+		parameters: AlertAddParams,
+		async execute(_id, params, _signal, _onUpdate, _ctx) {
+			try {
+				const ap = addAlert({
+					pattern: params.pattern,
+					flags: params.flags,
+					label: params.label,
+					target: params.target,
+					cooldownMs: params.cooldownMs,
+				});
+				const where = ap.target ? ` watching ${ap.target}` : " watching all subagents";
+				return ok(
+					`Alert ${ap.id} registered for /${ap.pattern}/${ap.flags}${where}.` +
+						` Fires on match (cooldown ${ap.cooldownMs}ms). Remove with subagent_alert_remove.`,
+					{ id: ap.id, pattern: ap.pattern, flags: ap.flags, label: ap.label, target: ap.target, cooldownMs: ap.cooldownMs },
+				);
+			} catch (e: any) {
+				return err(`Invalid regex: ${e.message}`);
+			}
+		},
+		renderCall(args, theme) {
+			return new Text(
+				theme.fg("toolTitle", theme.bold("subagent_alert_add ")) +
+					theme.fg("accent", `/${String(args.pattern)}/${String(args.flags ?? "")}`),
+				0,
+				0,
+			);
+		},
+	});
+
+	pi.registerTool({
+		name: "subagent_alert_remove",
+		label: "Subagent: remove alert",
+		description:
+			"Deregister an alert by id (from subagent_alert_add) or by pattern source, or all of them. Takes effect on the next poll tick — safe to call while subagents run.",
+		parameters: AlertRemoveParams,
+		async execute(_id, params, _signal, _onUpdate, _ctx) {
+			if (params.all) {
+				const n = clearAlerts();
+				return ok(n === 0 ? "No alerts to remove." : `Removed ${n} alert(s).`);
+			}
+			if (params.id) {
+				if (!removeAlert(params.id)) return err(`No alert with id "${params.id}".`);
+				return ok(`Removed alert ${params.id}.`);
+			}
+			if (params.pattern) {
+				const n = removeAlertsByPattern(params.pattern);
+				return ok(n === 0 ? `No alerts matching /${params.pattern}/.` : `Removed ${n} alert(s) matching /${params.pattern}/.`);
+			}
+			return err("Provide id, pattern, or all=true.");
+		},
+	});
+
+	pi.registerTool({
+		name: "subagent_alert_list",
+		label: "Subagent: list alerts",
+		description: "List registered alert regexes (id, pattern, flags, label, target, cooldown). Also shown in the /panels Alerts tab.",
+		parameters: Type.Object({}),
+		async execute(_id, _params, _signal, _onUpdate, _ctx) {
+			const alerts = getAlerts();
+			if (alerts.length === 0) return ok("No alerts registered.");
+			const rows = alerts.map((a: AlertPattern) => {
+				const lbl = a.label ? ` "${a.label}"` : "";
+				const where = a.target ? ` -> ${a.target}` : " -> all";
+				return `- ${a.id}${lbl}: /${a.pattern}/${a.flags}${where} (cd ${a.cooldownMs}ms)`;
+			});
+			return ok(rows.join("\n"), { alerts });
 		},
 	});
 }

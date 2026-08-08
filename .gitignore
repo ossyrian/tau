@@ -30,6 +30,7 @@ pi-config/agent/skills/*
 !pi-config/agent/skills/tau-share
 !pi-config/agent/skills/subagent-sessions
 !pi-config/agent/skills/glossary-maintenance
+!pi-config/agent/skills/index-maintenance
 
 # tau-standard extensions (user-added ones — status lines etc. — stay ignored)
 !pi-config/agent/extensions
@@ -38,7 +39,7 @@ pi-config/agent/extensions/*
 !pi-config/agent/extensions/git-guard.ts
 !pi-config/agent/extensions/share-tools
 !pi-config/agent/extensions/glossary-awareness.ts
-!pi-config/agent/extensions/scripts-awareness.ts
+!pi-config/agent/extensions/index-awareness.ts
 !pi-config/agent/extensions/todos.ts
 !pi-config/agent/extensions/workspace-tools
 !pi-config/agent/extensions/subagent-sessions

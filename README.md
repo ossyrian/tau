@@ -2,16 +2,15 @@
 
 Tau runs Pi in a disposable container with persistent host mounts for its config,
 skills, scripts, and project workspaces. The container is recreated on each start;
-only the mounted paths survive. That gives the agent a clean, reproducible
-environment that can't touch your host, while the things you care about — settings,
-skills, work-in-progress — persist across restarts.
+only the mounted paths survive. The agent gets a reproducible environment that can't
+touch your host; your settings, skills, and work-in-progress persist across restarts.
 
-Optional: if the agent needs cloud access, tau can push short-lived, readonly-scoped
-AWS credentials into the container so it never holds long-lived secrets. See
-[AWS credential scoping](#aws-credential-scoping-optional).
+Secrets reach the agent through `.env` (`tau env`), never baked into the image. For
+cloud access, tau can also inject short-lived scoped credentials into a container-only
+tmpfs — the AWS path is worked through in [AWS credential scoping](#aws-credential-scoping-optional).
 
-Requirements: Docker, bash, rsync (macOS or Linux). AWS CLI v2 only if you use
-the optional credential scoping.
+Requirements: Docker, bash, rsync (macOS or Linux). AWS CLI v2 only for the optional
+credential scoping.
 
 ## Layout
 
@@ -27,9 +26,12 @@ Tracked:
 - `pi-config/agent/` (tracked subset) — tau-standard Pi functionality that ships with
   the repo: the `tau` index skill, `tau-runtime` and `tau-git-shipping` skills, and
   the standard extensions (`tau-awareness`, `git-guard`, `workspace-tools`,
-  `subagent-sessions`, `scripts-awareness`, `glossary-awareness`, `todos`). The
+  `subagent-sessions`, `index-awareness`, `glossary-awareness`, `todos`). The
   `tau-awareness` extension injects the runtime block into every session's system
-  prompt, so `APPEND_SYSTEM.md` stays purely user territory.
+  prompt, so `APPEND_SYSTEM.md` stays purely user territory. `subagent-sessions`
+  lets the agent spawn other Pi sessions as subagents; each runs in its own named
+  tmux session, so you can watch one with `tau session attach` or survey them all
+  from `/panels` (`ctrl+alt+v`).
 
 The repo checkout stays clean: all per-user runtime state lives under **`~/.tau/`**
 on the host (override with `TAU_HOME`), not next to the CLI. Everything there is the
@@ -71,11 +73,10 @@ paths survive; everything else is lost.
 | `tau-nm-home` volume → `~/.no-mistakes` | yes | no-mistakes state (gate repos, runs, SQLite) |
 | container `~/.tau/` (creds) | no — tmpfs | wiped on recreate (this is a container path, not host `~/.tau`) |
 
-The two named Docker volumes are a third persistence class: they survive recreates like
-the bind mounts, but live in Docker rather than the host tree (SQLite is unreliable on
-virtiofs, and worktree gitdir pointers must stay container-local). `docker volume rm
-tau-treehouse tau-nm-home` resets them. A restart kills any in-flight no-mistakes
-pipeline run — check `no-mistakes axi status` from `tau shell` before restarting.
+The two named Docker volumes survive recreates like the bind mounts but live in Docker,
+not the host tree (SQLite is unreliable on virtiofs; worktree gitdir pointers must stay
+container-local). Reset them with `docker volume rm tau-treehouse tau-nm-home`. A restart
+kills any in-flight no-mistakes run — check `no-mistakes axi status` from `tau shell` first.
 
 ## Setup
 
@@ -111,16 +112,14 @@ echo "source $PWD/tau.fish" >> ~/.config/fish/config.fish
 
 ## Sharing files back to the host
 
-The container is isolated, so files the agent creates don't reach your machine on
-their own. The one channel out is the **share dropbox**: `~/share` in the container
-is bind-mounted from `~/.tau/share` on the host. Anything the agent writes there
-appears on your machine immediately.
+Files the agent creates don't reach your machine on their own. The one channel out is
+the **share dropbox**: `~/share` in the container is bind-mounted from `~/.tau/share`
+on the host, so anything written there appears on your machine immediately.
 
-The `share-tools` extension gives the agent a `share_file` tool (copy a file or
-directory into the dropbox, refuses to clobber, reports the host path) and
-`share_list`; the `tau-share` skill tells it when to reach for them. For code changes
-to a tracked repo it ships a PR through no-mistakes instead — the dropbox is for
-deliverables, not for landing commits, and the git-guard blocks git inside `~/share`.
+The `share-tools` extension gives the agent `share_file` (copy a file or directory in,
+refuse to clobber, report the host path) and `share_list`; the `tau-share` skill tells
+it when to use them. Code changes to a tracked repo ship as a PR through no-mistakes
+instead — the dropbox is for deliverables, not commits, and git-guard blocks git in `~/share`.
 
 ## Git, treehouse, and no-mistakes
 
@@ -160,10 +159,10 @@ don't resolve in the container.
 
 ## AWS credential scoping (optional)
 
-Set `PI_AWS_PROFILE` to give the agent readonly AWS access without holding long-lived
-keys. Tau resolves fresh temp creds on the host (SSO / assume-role) and pipes them
-into a container-only tmpfs — never onto host disk, never the SSO cache. Re-run
-`tau refresh` to push fresh ones without losing running sessions.
+The worked example of tau's scoped-credential injection. Set `PI_AWS_PROFILE` to give
+the agent readonly AWS access without long-lived keys: tau resolves fresh temp creds on
+the host (SSO / assume-role) and pipes them into a container-only tmpfs — never host disk,
+never the SSO cache. `tau refresh` pushes fresh ones without dropping running sessions.
 
 ```bash
 PI_AWS_PROFILE=<readonly-profile> tau start

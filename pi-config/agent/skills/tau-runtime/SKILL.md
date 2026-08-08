@@ -33,11 +33,11 @@ The user's projects are mounted at `/workspace/<name>` (added host-side with `ta
 
 To tell which, check `/proc/self/mountinfo` for an entry whose mount point is `/workspace/<name>`. The `workspace_list` and `workspace_path` tools report the kind for you. When the user says **"go to the <name> workspace"**, "go to <name>", or "work in <name>", they mean: make `/workspace/<name>` your working directory and do the task there. Use `workspace_list` to see what exists and `workspace_path <name>` to resolve and verify the directory before you `cd` into it.
 
-Never assume a path outside `/workspace/`.
+Never assume a path outside `/workspace/`. A running catalog of the mounted workspaces lives at `/workspace/INDEX.md` — read it to see what each is; keep it current when workspaces change (see the `index-maintenance` skill).
 
 ## Scripts (`~/scripts/`)
 
-A host-mounted, persistent directory of reusable shell scripts you're expected to know about and reach for at all times. It survives `tau` restarts. When a task could reuse a script already in there, read it and run it rather than reinventing. You may add new scripts to it when you build something reusable, and edit scripts there when needed.
+A host-mounted, persistent directory of reusable shell scripts you're expected to know about and reach for at all times. It survives `tau` restarts. When a task could reuse a script already in there, read it and run it rather than reinventing. You may add new scripts to it when you build something reusable, and edit scripts there when needed. `~/scripts/INDEX.md` is a running catalog of what is in the directory — read it before writing a new script, and update it when you add, remove, or change one (see the `index-maintenance` skill).
 
 This is separate from scripts bundled inside a skill (e.g. `~/.pi/agent/skills/<name>/scripts/`); those belong to their skill.
 

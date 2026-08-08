@@ -15,7 +15,7 @@ Everything listed here ships with the tau repo and is present in every tau insta
 | `tau-share` | Handing files back to the user's host machine via the `~/share` dropbox and the `share_file` / `share_list` tools |
 | `tau-git-shipping` | Git and GitHub in the container: cloning with the token credential helper, treehouse worktrees, shipping through the no-mistakes pipeline, the `~/share` no-git rule, the git-guard |
 | `subagent-sessions` | Delegating work to other pi sessions in this tmux harness |
-| `glossary-maintenance` | Maintaining the user's term→referent glossary |
+| `index-maintenance` | Reading and maintaining tau's running indexes: the glossary, `~/scripts/INDEX.md`, and `/workspace/INDEX.md` |
 | `no-mistakes` | Driving the validation pipeline (`no-mistakes axi`). Installed per-container by `no-mistakes init`, not tracked in the repo — if missing, run `no-mistakes init` in any repo |
 
 ## Extensions (`~/.pi/agent/extensions/`)
@@ -27,8 +27,8 @@ Everything listed here ships with the tau repo and is present in every tau insta
 | `share-tools/` | `share_file` / `share_list` — copy deliverables into `~/share` to hand them to the user's host machine |
 | `workspace-tools/` | `workspace_list` / `workspace_path` — read-only visibility into `/workspace/<name>` mounts and their kind (live vs copy) |
 | `subagent-sessions/` | Spawn and message other pi sessions (`subagent_list`, `subagent_send`, …) |
-| `scripts-awareness.ts` | Lists `~/scripts/` with descriptions in the system prompt |
-| `glossary-awareness.ts` | Injects `~/.pi/agent/glossary.md` into the system prompt |
+| `index-awareness.ts` | Seeds an `INDEX.md` stub into `~/scripts/` and `/workspace/` and injects a pointer to each; the agent reads/maintains them (see `index-maintenance`) |
+| `glossary-awareness.ts` | Injects `~/.pi/agent/glossary.md` in full into the system prompt |
 | `todos.ts` | `write_todos` planning tool |
 
 ## Bundled binaries (Docker image)

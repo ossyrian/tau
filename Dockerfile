@@ -13,6 +13,7 @@ RUN apt-get update && \
       vim \
       less \
       jq \
+      ripgrep \
       ca-certificates \
       locales \
       python3 \
@@ -20,12 +21,18 @@ RUN apt-get update && \
       python3-venv \
       gnupg \
       procps \
+      postgresql-client \
+      xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Pi needs Node >22
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+# Pi needs Node >22; pin to the latest LTS line (24.x "Krypton").
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
+
+# Make pnpm the default Node package manager via corepack (ships with Node).
+RUN corepack enable && corepack prepare pnpm@latest --activate
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 
 # don't render jank fonts
 RUN sed -i 's/^# *\(en_US.UTF-8\)/\1/' /etc/locale.gen && locale-gen
@@ -56,6 +63,18 @@ RUN arch="$(dpkg --print-architecture)" && \
       | tar xz -C /usr/local/bin treehouse && \
     curl -fsSL "https://github.com/kunchenguid/no-mistakes/releases/download/${NO_MISTAKES_VERSION}/no-mistakes-${NO_MISTAKES_VERSION}-linux-${arch}.tar.gz" \
       | tar xz -C /usr/local/bin no-mistakes
+
+# linear-cli (schpet/linear-cli) — the Linear CLI agents use to read/write
+# issues. Prebuilt glibc binary (matches this Debian base); reads
+# LINEAR_API_KEY from the env (see .env).
+ARG LINEAR_CLI_VERSION=v2.4.0
+RUN case "$(dpkg --print-architecture)" in \
+      amd64) triple=x86_64-unknown-linux-gnu ;; \
+      arm64) triple=aarch64-unknown-linux-gnu ;; \
+      *) echo "unsupported arch for linear-cli: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/schpet/linear-cli/releases/download/${LINEAR_CLI_VERSION}/linear-${triple}.tar.xz" \
+      | tar xJ -C /usr/local/bin --strip-components=1 "linear-${triple}/linear"
 
 # uv
 RUN curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
@@ -88,6 +107,7 @@ WORKDIR /workspace
 # tools managed by uv - add more here if you need
 ENV PATH="/home/pi/.local/bin:/home/pi/scripts:$PATH"
 RUN uv tool install ty@latest
+RUN uv tool install pre-commit@latest
 
 # state directories for no-mistakes and treehouse
 RUN mkdir -p /home/pi/.no-mistakes /home/pi/.treehouse && \
