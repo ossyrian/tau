@@ -19,8 +19,8 @@ Three parts:
 2. **Referent** — the concrete thing: a URL, a path, an ID. Not a description.
 3. **Action** — what resolving the term implies. "Prefer the /workspace copy if mounted", "query the prod DB, not dev". Omit if the referent alone is enough.
 
-Good: `- "the fabric repo" → https://github.com/HumanityLabsInc/fabric — prefer /workspace/fabric if mounted`
-Bad: `- "fabric" → the main product` (no concrete referent, no action)
+Good: `- "my_repo" → https://github.com/my-repo — prefer /workspace/my_repo if mounted`
+Bad: `- "my_repo" → the main product` (no concrete referent, no action)
 
 ## When to edit
 
