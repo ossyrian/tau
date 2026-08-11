@@ -45,9 +45,8 @@ import {
 	removeAlert,
 	removeAlertsByPattern,
 } from "./alert-store.ts";
-import { isTmuxAvailable, sanitizeTmuxName, sessionExists, shellQuote, tmux } from "./tmux.ts";
+import { isTmuxAvailable, sanitizeTmuxName, sessionExists, shellQuote, tmux, tmuxSessionName } from "./tmux.ts";
 import { forgetSubagent } from "./alerts.ts";
-import { registerPanel } from "./panel.ts";
 
 // The live subagent registry lives in registry.ts so the alert poller and panel
 // UI can read it without importing the manager. `registry` here is a direct
@@ -144,6 +143,14 @@ async function createSession(opts: CreateOptions): Promise<SubagentRecord> {
 	const saveSession = opts.saveSession ?? false;
 	const labelSlug = opts.label ? sanitizeTmuxName(opts.label) : "";
 	const sessionName = labelSlug ? `sa-${labelSlug}-${id}` : `sa-${id}`;
+	// The spawner is whatever tmux session is running this pi — that relationship
+	// is the only thing that makes the new session a "subagent".
+	let spawnedBy: string | undefined;
+	try {
+		spawnedBy = tmuxSessionName();
+	} catch {
+		/* not attached / no server — leave unset */
+	}
 	const windowName = labelSlug || `sa-${id}`;
 
 	const piArgs: string[] = [];
@@ -200,6 +207,7 @@ async function createSession(opts: CreateOptions): Promise<SubagentRecord> {
 		persistent,
 		paneId,
 		tmuxSession: sessionName,
+		spawnedBy,
 		windowName,
 		createdAt: Date.now(),
 		settledCount: 0,
@@ -789,8 +797,6 @@ export function registerManager(pi: ExtensionAPI): void {
 			ctx.ui.notify(rows.join("\n"), "info");
 		},
 	});
-
-	registerPanel(pi);
 
 	pi.registerTool({
 		name: "subagent_alert_add",

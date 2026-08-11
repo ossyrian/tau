@@ -35,6 +35,14 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { Container, Key, matchesKey, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
+// The panel (Ctrl+Alt+V) and this widget are separate extensions with separate
+// module graphs, so they coordinate over pi's shared event bus. The panel emits
+// PANEL_CHANNEL on open/close; we mirror the open state here and force a widget
+// rebuild so the plan list never shows on both surfaces at once.
+const PANEL_CHANNEL = "tau:panel";
+let panelOpen = false;
+const isPanelOpen = () => panelOpen;
+
 type TodoStatus = "pending" | "in_progress" | "completed";
 
 interface Todo {
@@ -166,52 +174,57 @@ const statusText = (t: Todo, theme: Theme): string =>
 			? theme.fg("text", t.content)
 			: theme.fg("muted", t.content);
 
-/** Build the live plan widget shown above the editor. */
+/**
+ * Build the live plan widget shown above the editor. With one plan it is a
+ * single header plus its todos. With several plans it becomes a row per plan
+ * (● active / ○ inactive, ▸ on the one in view) and only the viewed plan's
+ * todos expand beneath it — the same collapse-all-but-viewed model as the
+ * panel's Plans tab, so an inactive plan never renders permanently expanded.
+ */
+// Latest UI-bearing context, captured so the event-bus handler (which gets no
+// ctx of its own) can refresh the widget when the panel opens or closes.
+let lastCtx: ExtensionContext | undefined;
+
 const buildWidget = (theme: Theme): Container => {
 	const c = new Container();
 	const names = planNamesInOrder();
-	const showing = viewedPlan ?? activePlan;
-	const list = plans.get(showing) ?? [];
-	const done = list.filter((t) => t.status === "completed").length;
-	const isActive = showing === activePlan;
+	const viewing = viewedPlan ?? activePlan;
 
-	// Line 1: bullet, plan name, active/viewing tag, done count. The tag and
-	// count use bright colors (success/warning/text) so the active plan and
-	// progress stay obvious instead of washing out.
-	let header = theme.fg("accent", "● ");
-	header += theme.fg("accent", theme.bold(planLabel(showing)));
-	header += "  ";
-	if (isActive) {
-		header += theme.fg("success", theme.bold("active"));
-	} else {
-		header += theme.fg("warning", "viewing");
-		header += theme.fg("dim", ` · active: ${planLabel(activePlan)}`);
+	// The panel (Ctrl+Alt+V) is the full plan view when open; the widget defers to
+	// it so the plan list isn't rendered on both surfaces at once.
+	if (isPanelOpen()) {
+		c.addChild(new Text(theme.fg("dim", "Plans shown in the panel · Ctrl+Alt+V to close"), 0, 0));
+		return c;
 	}
-	header += theme.fg("text", `   ${done}/${list.length} done`);
-	c.addChild(new Text(header, 0, 0));
 
-	// Line 2: a tab per plan (only when >1), so the full set of plans and the
-	// active one (▸) are visible at a glance. Bold marks the plan in view.
-	if (names.length > 1) {
-		const tabs = names.map((n) => {
-			const label = planLabel(n);
-			const isAct = n === activePlan;
-			const isView = n === showing;
-			let s = isAct ? theme.fg("accent", "▸ ") : "  ";
-			if (isView) {
-				s += theme.fg("accent", theme.bold(label));
-			} else if (isAct) {
-				s += theme.fg("accent", label);
-			} else {
-				s += theme.fg("muted", label);
-			}
-			return s;
-		});
-		c.addChild(new Text(theme.fg("borderMuted", "  Plans  ") + tabs.join(theme.fg("borderMuted", "  ")), 0, 0));
+	const renderTodos = (list: Todo[], indent: string) => {
+		for (const t of list) {
+			c.addChild(new Text(`${indent}${statusIcon(t.status, theme)} ${statusText(t, theme)}`, 0, 0));
+		}
+	};
+
+	if (names.length <= 1) {
+		const list = plans.get(viewing) ?? [];
+		const done = list.filter((t) => t.status === "completed").length;
+		let header = theme.fg("accent", "● ") + theme.fg("accent", theme.bold(planLabel(viewing)));
+		header += theme.fg("success", "  active");
+		header += theme.fg("text", `   ${done}/${list.length} done`);
+		c.addChild(new Text(header, 0, 0));
+		renderTodos(list, "  ");
+		c.addChild(new Text(theme.fg("dim", "Ctrl+Alt+V · open panel"), 0, 0));
+		return c;
 	}
-	for (const t of list) {
-		c.addChild(new Text(`  ${statusIcon(t.status, theme)} ${statusText(t, theme)}`, 0, 0));
+
+	for (const name of names) {
+		const list = plans.get(name) ?? [];
+		const done = list.filter((t) => t.status === "completed").length;
+		const cursor = name === viewing ? theme.fg("accent", "▸ ") : "  ";
+		const dot = name === activePlan ? theme.fg("success", "● active") : theme.fg("dim", "○ inactive");
+		const label = name === viewing ? theme.fg("accent", theme.bold(planLabel(name))) : theme.fg("muted", planLabel(name));
+		c.addChild(new Text(`${cursor}${dot}  ${label}  ${theme.fg("dim", `${done}/${list.length} done`)}`, 0, 0));
+		if (name === viewing) renderTodos(list, "      ");
 	}
+	c.addChild(new Text(theme.fg("dim", "Ctrl+Alt+V · open panel"), 0, 0));
 	return c;
 };
 
@@ -242,6 +255,7 @@ const buildCompactWidget = (theme: Theme): Container => {
 
 const refreshWidget = (ctx: ExtensionContext) => {
 	if (!ctx.hasUI) return;
+	lastCtx = ctx;
 	if (plans.size === 0) {
 		ctx.ui.setWidget(TOOL_NAME, undefined);
 		return;
@@ -443,6 +457,13 @@ class TodoViewerComponent {
 }
 
 export default function (pi: ExtensionAPI) {
+	// When the panel opens it becomes the authoritative plan view; rebuild the
+	// widget so buildWidget re-reads isPanelOpen() and collapses to a hint.
+	pi.events.on(PANEL_CHANNEL, (data) => {
+		panelOpen = (data as { open?: boolean } | undefined)?.open === true;
+		if (lastCtx) refreshWidget(lastCtx);
+	});
+
 	// Replay state on (re)load and on branch navigation.
 	pi.on("session_start", async (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", async (_event, ctx) => reconstructState(ctx));

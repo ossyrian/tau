@@ -1,17 +1,18 @@
 /**
- * Beacon: hooks registered inside each subagent pi process.
+ * Beacon: reports this session's lifecycle back to whoever spawned it.
  *
- * Active only when PI_SUBAGENT_ID is set (the parent sets it via
- * `tmux new-session -e`). The beacon writes a small JSONL event stream to
- * <STATE_DIR>/beacon-<id>.jsonl that the parent polls:
+ * A no-op unless PI_SUBAGENT_ID is present — that env var is the return address
+ * a spawner set via `tmux new-session -e`. When present, the beacon writes a
+ * small JSONL event stream to <STATE_DIR>/beacon-<id>.jsonl that the spawner
+ * polls:
  *
- *   ready     -> session_start      (the subagent is up and at a prompt)
+ *   ready     -> session_start      (the session is up and at a prompt)
  *   busy      -> agent_start        (a run started)
  *   settled   -> agent_settled      (the run finished; `text` is the final
  *                                    assistant response, captured verbatim)
- *   shutdown  -> session_shutdown   (the subagent pi is exiting)
+ *   shutdown  -> session_shutdown   (the pi is exiting)
  *
- * The parent distinguishes "idle" (last event ready/settled) from "busy"
+ * The spawner distinguishes "idle" (last event ready/settled) from "busy"
  * (last event busy) without screen-scraping, and reads the final response
  * straight from the settled event instead of capturing the pane.
  */

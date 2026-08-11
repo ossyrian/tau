@@ -68,6 +68,14 @@ function planLabel(name: string): string {
 }
 
 /** One-line digest of a beacon event for the Subagents tab's activity preview. */
+// Collapse newlines/tabs into single spaces so a value can never span more than
+// one terminal row. The Component contract requires render() to return one
+// physical line per array entry; a stray \n silently breaks the differential
+// renderer's line accounting and corrupts every subsequent frame.
+function oneLine(s: string): string {
+	return s.replace(/\s+/g, " ").trim();
+}
+
 function beaconDigest(e: BeaconEvent): string {
 	switch (e.event) {
 		case "ready":
@@ -407,6 +415,9 @@ class PanelsComponent {
 		return nav;
 	}
 
+	// One row per plan with a cursor, mirroring the Subagents tab: j/k moves the
+	// selection and only the selected plan expands its todos below. This keeps the
+	// full set of plans visible at once and no plan stays permanently expanded.
 	private renderPlans(lines: string[], width: number): void {
 		const th = this.theme;
 		if (this.plans.size === 0) {
@@ -414,26 +425,33 @@ class PanelsComponent {
 			return;
 		}
 		const names = [...this.plans.keys()];
-		const showing = names[Math.min(this.selected, names.length - 1)] ?? this.activePlan;
-		const list = this.plans.get(showing) ?? [];
-		const done = list.filter((t) => t.status === "completed").length;
-		const isActive = showing === this.activePlan;
-		const tag = isActive ? th.fg("accent", " active") : th.fg("dim", " viewing");
-		lines.push(truncateToWidth(`  ${th.fg("muted", planLabel(showing))}${tag}  ${th.fg("dim", `${done}/${list.length} done`)}`, width));
-		lines.push("");
-		if (list.length === 0) {
-			lines.push(truncateToWidth(`  ${th.fg("dim", "(empty)")}`, width));
-			return;
-		}
-		list.forEach((t, i) => {
-			const mark = (c: string, s: string) => th.fg(c, s);
-			const text = t.status === "completed" ? th.fg("dim", t.content) : t.status === "in_progress" ? th.fg("text", t.content) : th.fg("muted", t.content);
-			lines.push(truncateToWidth(`  ${statusIcon(t.status, mark)} ${th.fg("dim", `${i + 1}.`)} ${text}`, width));
+		names.forEach((name, i) => {
+			const list = this.plans.get(name) ?? [];
+			const done = list.filter((t) => t.status === "completed").length;
+			const cursor = i === this.selected ? th.fg("accent", "▸ ") : "  ";
+			const tag = name === this.activePlan ? th.fg("success", "● active") : th.fg("dim", "○ inactive");
+			lines.push(
+				truncateToWidth(
+					`${cursor}${tag}  ${th.fg("accent", planLabel(name))}  ${th.fg("dim", `${done}/${list.length} done`)}`,
+					width,
+				),
+			);
+			if (i !== this.selected) return;
+			if (list.length === 0) {
+				lines.push(truncateToWidth(`      ${th.fg("dim", "(empty)")}`, width));
+				return;
+			}
+			list.forEach((t, n) => {
+				const mark = (c: string, s: string) => th.fg(c, s);
+				const text =
+					t.status === "completed"
+						? th.fg("dim", t.content)
+						: t.status === "in_progress"
+							? th.fg("text", t.content)
+							: th.fg("muted", t.content);
+				lines.push(truncateToWidth(`      ${statusIcon(t.status, mark)} ${th.fg("dim", `${n + 1}.`)} ${text}`, width));
+			});
 		});
-		if (names.length > 1) {
-			lines.push("");
-			lines.push(truncateToWidth(`  ${th.fg("dim", `Plans: ${names.map((n) => (n === this.activePlan ? planLabel(n) + "*" : planLabel(n))).join("  ·  ")}`)}`, width));
-		}
 	}
 
 	private renderSubagents(lines: string[], width: number): void {
@@ -451,9 +469,10 @@ class PanelsComponent {
 			if (i === this.selected) {
 				const evs = readBeaconEvents(r.id);
 				for (const e of evs.slice(-3)) {
-					lines.push(truncateToWidth(`      ${th.fg("dim", beaconDigest(e))}`, width));
+					lines.push(truncateToWidth(`      ${th.fg("dim", oneLine(beaconDigest(e)))}`, width));
 				}
-				lines.push(truncateToWidth(`      ${th.fg("dim", `cwd=${r.cwd}`)}`, width));
+				const origin = r.spawnedBy ? `spawned by ${r.spawnedBy} · ` : "";
+				lines.push(truncateToWidth(`      ${th.fg("dim", `${origin}cwd=${r.cwd}`)}`, width));
 			}
 		});
 	}
@@ -507,6 +526,12 @@ class PanelsComponent {
 // panels — which would double the render tick and repaint everything twice.
 let panelOpen = false;
 
+// The todos widget lives in a separate extension (separate module graph), so we
+// tell it to stand down / re-expand over pi's shared event bus. Captured at
+// registration since openPanels only receives ctx, not the ExtensionAPI.
+const PANEL_CHANNEL = "tau:panel";
+let emitPanelOpen: (open: boolean) => void = () => {};
+
 function openPanels(ctx: ExtensionContext): void {
 	if (ctx.mode !== "tui") {
 		ctx.ui.notify("Panels viewer is TUI-only.", "warning");
@@ -514,9 +539,14 @@ function openPanels(ctx: ExtensionContext): void {
 	}
 	if (panelOpen) return;
 	panelOpen = true;
+	// Tell the todos widget to stand down so the plan list isn't shown twice.
+	emitPanelOpen(true);
 	ctx.ui.custom<void>((tui, theme, _kb, done) => {
 		const comp = new PanelsComponent(ctx, theme, tui, () => {
 			panelOpen = false;
+			emitPanelOpen(false);
+			// Repaint so the todos widget re-expands now that the panel is gone.
+			tui.requestRender();
 			done();
 		});
 		comp.startLive();
@@ -534,6 +564,8 @@ function openPanels(ctx: ExtensionContext): void {
 }
 
 export function registerPanel(pi: ExtensionAPI): void {
+	emitPanelOpen = (open) => pi.events.emit(PANEL_CHANNEL, { open });
+
 	pi.registerCommand("panels", {
 		description: "Open the unified Plans / Subagents / Sessions / Alerts panel (vim-ish; q/Esc returns to insert)",
 		handler: async (_args, ctx) => openPanels(ctx),

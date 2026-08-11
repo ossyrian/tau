@@ -26,6 +26,8 @@ export interface SubagentRecord {
 	persistent: boolean;
 	paneId: string;
 	tmuxSession: string;
+	/** tmux session that spawned this one — the only thing that makes it a "subagent". */
+	spawnedBy?: string;
 	windowName: string;
 	createdAt: number;
 	settledCount: number;
