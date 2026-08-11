@@ -21,44 +21,37 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import * as fs from "node:fs";
+import { STATE_DIR, ensureStateDir, genId } from "./state.ts";
+import { type BeaconEvent, cap, readBeaconEvents, removeBeacon, spill } from "./beacon-store.ts";
 import {
-	STATE_DIR,
-	type AlertPattern,
-	type BeaconEvent,
 	type SubagentRecord,
-	addAlert,
-	cap,
-	clearAlerts,
 	cleanupScratchFiles,
 	destroySubagent,
-	ensureStateDir,
 	findByIdOrLabel,
-	genId,
-	getAlerts,
 	getRegistry,
 	hydrateRegistry,
 	inputPayloadPath,
-	isTmuxAvailable,
 	labelOf,
-	readBeaconEvents,
 	reconcile,
+	removeRecord,
+	systemPromptPath,
+	upsertRecord,
+} from "./registry.ts";
+import {
+	type AlertPattern,
+	addAlert,
+	clearAlerts,
+	getAlerts,
 	removeAlert,
 	removeAlertsByPattern,
-	removeBeacon,
-	removeRecord,
-	sanitizeTmuxName,
-	sessionExists,
-	shellQuote,
-	spill,
-	systemPromptPath,
-	tmux,
-	upsertRecord,
-} from "./shared.ts";
+} from "./alert-store.ts";
+import { isTmuxAvailable, sanitizeTmuxName, sessionExists, shellQuote, tmux } from "./tmux.ts";
 import { forgetSubagent } from "./alerts.ts";
 import { registerPanel } from "./panel.ts";
 
-// Live subagent registry lives in shared.ts so the alert poller and panel UI
-// can read it without a circular import. `registry` here is a direct reference.
+// The live subagent registry lives in registry.ts so the alert poller and panel
+// UI can read it without importing the manager. `registry` here is a direct
+// reference to that in-memory map.
 const registry = getRegistry();
 
 // per-subagent async lock so concurrent tool calls on the same session serialize

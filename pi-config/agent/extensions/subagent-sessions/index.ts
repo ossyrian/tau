@@ -15,7 +15,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { startAlertPoller, stopAlertPoller } from "./alerts.ts";
 import { registerBeacon } from "./beacon.ts";
 import { registerManager } from "./manager.ts";
-import { loadAlerts } from "./shared.ts";
+import { loadAlerts } from "./alert-store.ts";
 
 export default function (pi: ExtensionAPI) {
 	if (process.env.PI_SUBAGENT_ID) {

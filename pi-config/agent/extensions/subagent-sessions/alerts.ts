@@ -18,18 +18,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
-	type AlertPattern,
-	type BeaconEvent,
-	type SubagentRecord,
-	cap,
-	getAlerts,
-	getRegistry,
-	labelOf,
-	readBeaconEvents,
-	sessionExists,
-	spillToFile,
-} from "./shared.ts";
+import { type AlertPattern, getAlerts } from "./alert-store.ts";
+import { type BeaconEvent, cap, readBeaconEvents, spillToFile } from "./beacon-store.ts";
+import { type SubagentRecord, getRegistry, labelOf } from "./registry.ts";
+import { sessionExists } from "./tmux.ts";
 
 const POLL_MS = 2000;
 /** Alerts are meant to inform, not to carry payload. Keep the matched slice short;

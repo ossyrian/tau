@@ -17,7 +17,8 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { appendBeacon, cap, ensureStateDir } from "./shared.ts";
+import { appendBeacon, cap } from "./beacon-store.ts";
+import { ensureStateDir } from "./state.ts";
 
 let lastAssistantText = "";
 let settledSeq = 0;
