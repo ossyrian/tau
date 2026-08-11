@@ -3,7 +3,7 @@
  *
  * Reads ~/.pi/agent/glossary.md (override with PI_GLOSSARY_FILE) at session
  * start and appends it under a "## Glossary" section, so ambiguous phrases
- * like "the fabric repo" resolve to their concrete referents without asking.
+ * resolve to their concrete referents without asking.
  *
  * The file is re-read at each session start; mid-session edits (e.g. the
  * agent adding an entry on request) land in the next session.
