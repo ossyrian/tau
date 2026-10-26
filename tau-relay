@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# Container PID 1. Relays loopback-only listeners onto the container IP so
+# published ports reach them (e.g. impeccable's live helper, or a dev server
+# started without --host).
+#
+# For each port in $TAU_PORTS ("5173,8400-8409") that is listening on
+# loopback, run socat from <container-ip>:port to 127.0.0.1:port. The relay is
+# stopped when the loopback listener goes away, so a server restarted on
+# 0.0.0.0 can still bind the port.
+
+set -uo pipefail
+
+readonly POLL_SECONDS=2
+
+# As PID 1, bash ignores SIGTERM unless trapped.
+trap 'exit 0' TERM INT
+
+#######################################
+# Expand "5173,8400-8402" to one port per line.
+# Arguments:
+#   Port spec.
+#######################################
+expand_ports() {
+  local part
+  local -a parts
+  IFS=',' read -ra parts <<<"$1"
+  for part in "${parts[@]}"; do
+    [[ -n "${part}" ]] || continue
+    seq "${part%-*}" "${part#*-}"
+  done
+}
+
+# True if something accepts connections on 127.0.0.1:$1.
+loopback_open() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+main() {
+  local ip port
+  local -A pids=()
+  ip="$(hostname -i | awk '{print $1}')"
+  local -a ports=()
+  mapfile -t ports < <(expand_ports "${TAU_PORTS:-}")
+
+  while true; do
+    for port in "${ports[@]}"; do
+      if loopback_open "${port}"; then
+        if [[ -z "${pids[${port}]:-}" ]] || ! kill -0 "${pids[${port}]}" 2>/dev/null; then
+          socat "TCP-LISTEN:${port},bind=${ip},fork,reuseaddr" \
+            "TCP:127.0.0.1:${port}" 2>/dev/null &
+          pids[${port}]=$!
+        fi
+      elif [[ -n "${pids[${port}]:-}" ]]; then
+        kill "${pids[${port}]}" 2>/dev/null
+        unset "pids[${port}]"
+      fi
+    done
+    sleep "${POLL_SECONDS}" &
+    wait $!
+  done
+}
+
+main

@@ -8,6 +8,10 @@
 # Max worktrees per pool.
 max_trees = 8
 
+# Keep the pool inside the repo (<repo>/.treehouse). Git runs through a proxy
+# that can only enter the workspace, so worktrees must be there too.
+root = "."
+
 # Lifecycle hooks run sequentially in the worktree dir via /bin/sh -c.
 # Failures are logged but don't fail the operation. Typical use: seed env
 # files / install deps into a fresh worktree.

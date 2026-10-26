@@ -1,8 +1,12 @@
+.git/
 .env
 .gitconfig
-.git/
 workspace/
 pi-config/
+*.md
 skills.conf
 workspaces.conf
-*.md
+tau
+**/*_test.go
+tools/md2html/node_modules/
+tools/annotate/

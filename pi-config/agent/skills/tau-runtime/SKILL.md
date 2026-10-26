@@ -5,7 +5,8 @@ description: Use when you need to inspect or change your own configuration, mode
 
 # tau runtime
 
-You run inside **tau** — a Docker sandbox on the user's machine. You are the `pi` user (uid 1000), non-root. Your AWS credentials are short-lived and **read-only**; you cannot escalate them.
+You run inside **tau** — a Docker sandbox on the user's machine, as a non-root user of a **profile** (your name and home are in `$USER` and `$HOME`).
+
 
 ## What persists vs what is wiped
 
@@ -16,11 +17,9 @@ The container is recreated on every `tau start` / `stop` / `restart`. Anything w
 | `~/.pi/agent/` | your config + skills | host-mounted, read-write, survives recreate |
 | `/workspace/` | working files; `/workspace/<name>` are either live binds into the user's project or copy mounts (snapshots) | host-mounted (virtiofs), read-write |
 | `~/scripts/` | reusable shell scripts you're expected to know about and reach for | host-mounted (virtiofs), read-write, survives recreate |
-| `~/share/` | file dropbox to the user's host machine (lands at `~/.tau/share`) | host-mounted; the sanctioned way to hand files out — see `tau-share` |
+| `~/share/` | files you share with the user | host-mounted; the user sees what you put here |
 | `~/.pi/agent/skills/<name>/` (the seeded ones) | skills the user shares from their own machine | edits write back to the user's real files — see warning below |
-| `~/.treehouse/` | treehouse worktree pools | Docker volume, survives recreate |
-| `~/.no-mistakes/` | no-mistakes state (gate repos, runs, SQLite) | Docker volume, survives recreate |
-| `~/.tau/` | your AWS creds | **tmpfs — wiped on recreate.** Never store anything here you need to keep |
+| `~/.treehouse/` | treehouse worktree pools | host-mounted (lands at `~/.tau/treehouse`), survives recreate |
 
 Write durable things under `~/.pi/agent/` or `/workspace/`. Nothing else is safe across a restart.
 
@@ -34,6 +33,16 @@ The user's projects are mounted at `/workspace/<name>` (added host-side with `ta
 To tell which, check `/proc/self/mountinfo` for an entry whose mount point is `/workspace/<name>`. The `workspace_list` and `workspace_path` tools report the kind for you. When the user says **"go to the <name> workspace"**, "go to <name>", or "work in <name>", they mean: make `/workspace/<name>` your working directory and do the task there. Use `workspace_list` to see what exists and `workspace_path <name>` to resolve and verify the directory before you `cd` into it.
 
 Never assume a path outside `/workspace/`. A running catalog of the mounted workspaces lives at `/workspace/INDEX.md` — read it to see what each is; keep it current when workspaces change (see the `index-maintenance` skill).
+
+## Images from the user
+
+The user pastes images with `tau paste` on their host; you see a path like `/home/pi/share/clipboard/clip-<timestamp>.png` in their message. Open it with the `read` tool to view it. If your model can't see images, say so and ask them to `/model` to a vision-capable one.
+
+## Browser and serving to the user
+
+If the image was built with the `browser` package, Playwright (`playwright-core`, Node) and Chromium are installed (check `command -v chromium-nosandbox`). Use `chromium.launch()` as normal; for a raw Chromium launch use `$IMPECCABLE_BROWSER`, which adds `--no-sandbox` (Chromium refuses to start without it here).
+
+The user's browser reaches the container only through ports in `$TAU_PORTS` (published to the host's `127.0.0.1`; changing them needs a `tau restart` by the user). A server listening on loopback inside the container is relayed automatically, so `localhost:<port>` on the host works for any port in `$TAU_PORTS`. A port outside it is unreachable — tell the user to add it via `PI_PORTS`. Prefer `0.0.0.0` for dev servers (e.g. `vite --host`).
 
 ## Scripts (`~/scripts/`)
 

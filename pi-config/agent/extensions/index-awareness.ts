@@ -33,7 +33,7 @@ interface Surface {
 }
 
 const SCRIPTS_DIR = process.env.PI_SCRIPTS_DIR || path.join(os.homedir(), "scripts");
-const WORKSPACE_DIR = process.env.PI_WORKSPACE_DIR || "/workspace";
+const WORKSPACE_DIR = process.env.PI_WORKSPACE_DIR || process.env.TAU_WORKSPACE || "/workspace";
 const INDEX_FILE = "INDEX.md";
 
 const SURFACES: Surface[] = [

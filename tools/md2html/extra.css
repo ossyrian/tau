@@ -1,0 +1,45 @@
+/* Page chrome + Shiki/Mermaid theming. Appended after github-markdown.css. */
+html { color-scheme: light dark; }
+body { margin: 0; background: #fff; }
+.markdown-body {
+  box-sizing: border-box;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 45px;
+}
+@media (max-width: 767px) { .markdown-body { padding: 15px; } }
+@media (prefers-color-scheme: dark) { body { background: #0d1117; } }
+
+/* Shiki: dual-theme via CSS variables (no JS). */
+.shiki, .shiki span { color: var(--shiki-light); }
+.shiki { background-color: var(--shiki-light-bg); }
+@media (prefers-color-scheme: dark) {
+  .shiki, .shiki span { color: var(--shiki-dark); }
+  .shiki { background-color: var(--shiki-dark-bg); }
+}
+.markdown-body pre.shiki { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; border-radius: 6px; }
+.markdown-body pre.shiki code { background: none; padding: 0; font-size: 100%; white-space: pre; }
+
+/* Mermaid: both renderings are inlined; show the one matching the scheme. */
+.mermaid-diagram { margin: 16px 0; overflow-x: auto; text-align: center; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+.mm-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  .mm-light { display: none; }
+  .mm-dark { display: block; }
+}
+
+/* TOC */
+details.toc { margin: 0 0 24px; padding: 8px 16px; border: 1px solid var(--borderColor-default, #d0d7de); border-radius: 6px; }
+details.toc summary { cursor: pointer; font-weight: 600; }
+details.toc ul { margin: 8px 0 4px; padding-left: 0; list-style: none; }
+details.toc li { margin: 2px 0; }
+details.toc li.toc-l3 { padding-left: 1.25em; }
+
+/* Heading permalink anchors: GitHub-style, quiet until hover. */
+.markdown-body .header-anchor { color: inherit; text-decoration: none; }
+.markdown-body .header-anchor:hover { text-decoration: underline; }
+
+/* Task list checkboxes from markdown-it-task-lists. */
+.markdown-body ul.contains-task-list { list-style: none; padding-left: 0; }
+.markdown-body .task-list-item-checkbox { margin: 0 0.4em 0.25em -0.2em; vertical-align: middle; }

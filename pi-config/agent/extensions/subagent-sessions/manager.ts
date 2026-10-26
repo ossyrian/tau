@@ -17,10 +17,11 @@
  *     response, and tears it down.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { STATE_DIR, ensureStateDir, genId } from "./state.ts";
 import { type BeaconEvent, cap, readBeaconEvents, removeBeacon, spill } from "./beacon-store.ts";
 import {
@@ -45,7 +46,15 @@ import {
 	removeAlert,
 	removeAlertsByPattern,
 } from "./alert-store.ts";
-import { isTmuxAvailable, sanitizeTmuxName, sessionExists, shellQuote, tmux, tmuxSessionName } from "./tmux.ts";
+import {
+	isTmuxAvailable,
+	listTmuxSessions,
+	sanitizeTmuxName,
+	sessionExists,
+	shellQuote,
+	tmux,
+	tmuxSessionName,
+} from "./tmux.ts";
 import { forgetSubagent } from "./alerts.ts";
 
 // The live subagent registry lives in registry.ts so the alert poller and panel
@@ -132,10 +141,78 @@ interface CreateOptions {
 	extraArgs?: string[];
 }
 
-async function createSession(opts: CreateOptions): Promise<SubagentRecord> {
+type ResolvedModel = {
+	readonly argument: string;
+	readonly id: string;
+	readonly provider: string;
+	readonly environment: Readonly<Record<string, string>>;
+};
+
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+// extraArgs that would let a caller override the validated model or its credentials.
+const BLOCKED_EXTRA_ARGS = new Set(["--api-key", "--model", "--provider"]);
+
+function splitThinkingSuffix(argument: string): { readonly name: string; readonly thinking?: string } {
+	const separator = argument.lastIndexOf(":");
+	if (separator < 0) return { name: argument };
+	const thinking = argument.slice(separator + 1);
+	if (!THINKING_LEVELS.has(thinking)) return { name: argument };
+	return { name: argument.slice(0, separator), thinking };
+}
+
+function rejectCredentialOverrides(args: readonly string[]): void {
+	const blocked = args.find((arg) => BLOCKED_EXTRA_ARGS.has(arg.split("=", 1)[0]));
+	if (blocked) {
+		throw new Error(
+			`extraArgs ${blocked} is not allowed. Set the subagent's model instead; its credentials come from the model config.`,
+		);
+	}
+}
+
+// Validate the requested model against the session's configured models and resolve
+// its credentials. Falls back to the parent's own model when none is requested, so
+// a subagent never inherits stray provider env or starts with invalid credentials.
+async function resolveModel(requested: string | undefined, ctx: ExtensionContext): Promise<ResolvedModel> {
+	await ctx.modelRegistry.refresh();
+	const parsed = requested ? splitThinkingSuffix(requested) : null;
+	const matches = parsed
+		? ctx.modelRegistry
+				.getAll()
+				.filter((model) => `${model.provider}/${model.id}` === parsed.name || model.id === parsed.name)
+		: ctx.model
+			? [ctx.model]
+			: [];
+	if (matches.length === 0) {
+		const available = ctx.modelRegistry
+			.getAll()
+			.map((model) => `${model.provider}/${model.id}`)
+			.join(", ");
+		throw new Error(`Unknown subagent model "${requested}". Configured models: ${available || "(none)"}.`);
+	}
+	if (matches.length > 1) {
+		const options = matches.map((model) => `${model.provider}/${model.id}`).join(", ");
+		throw new Error(`Subagent model "${requested}" is ambiguous. Use provider/model: ${options}.`);
+	}
+	const model = matches[0];
+	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+	if (!auth.ok) {
+		throw new Error(`Subagent model ${model.provider}/${model.id} has no valid credentials: ${auth.error}`);
+	}
+	const suffix = parsed?.thinking ? `:${parsed.thinking}` : "";
+	return {
+		argument: `${model.provider}/${model.id}${suffix}`,
+		id: model.id,
+		provider: model.provider,
+		environment: auth.env ?? {},
+	};
+}
+
+async function createSession(opts: CreateOptions, ctx: ExtensionContext): Promise<SubagentRecord> {
 	if (!isTmuxAvailable()) {
 		throw new Error("Not running inside tmux. Subagent sessions need the tau tmux server.");
 	}
+	rejectCredentialOverrides(opts.extraArgs ?? []);
+	const resolvedModel = await resolveModel(opts.model, ctx);
 	ensureStateDir();
 	const id = genId();
 	const cwd = opts.cwd || process.cwd();
@@ -156,7 +233,7 @@ async function createSession(opts: CreateOptions): Promise<SubagentRecord> {
 	const piArgs: string[] = [];
 	if (!saveSession) piArgs.push("--no-session");
 	if (opts.label) piArgs.push("--name", opts.label);
-	if (opts.model) piArgs.push("--model", opts.model);
+	piArgs.push("--model", resolvedModel.argument);
 	if (opts.tools) piArgs.push("--tools", opts.tools);
 	if (opts.systemPrompt) {
 		const sp = systemPromptPath(id);
@@ -172,6 +249,9 @@ async function createSession(opts: CreateOptions): Promise<SubagentRecord> {
 
 	const cmd = ["pi", ...piArgs].map(shellQuote).join(" ");
 
+	// Pass the resolved provider credentials into the subagent's tmux env so it starts
+	// with valid auth instead of whatever happens to be inherited.
+	const credentialArgs = Object.entries(resolvedModel.environment).flatMap(([name, value]) => ["-e", `${name}=${value}`]);
 	const paneId = tmux([
 		"new-session",
 		"-d",
@@ -181,6 +261,7 @@ async function createSession(opts: CreateOptions): Promise<SubagentRecord> {
 		`PI_SUBAGENT_ID=${id}`,
 		"-e",
 		`PI_SUBAGENT_STATE_DIR=${STATE_DIR}`,
+		...credentialArgs,
 		"-c",
 		cwd,
 		"-n",
@@ -202,7 +283,7 @@ async function createSession(opts: CreateOptions): Promise<SubagentRecord> {
 	const record: SubagentRecord = {
 		id,
 		label: opts.label,
-		model: opts.model,
+		model: `${resolvedModel.provider}/${resolvedModel.id}`,
 		cwd,
 		persistent,
 		paneId,
@@ -321,6 +402,73 @@ function readOutput(r: SubagentRecord, raw: boolean): string {
 	return renderDigest(r, evs);
 }
 
+// --- messaging arbitrary sessions ---
+
+// Type a message into any tmux session's active pane and submit it. Used for
+// sessions this pi did not spawn (independent tau sessions, or sibling
+// subagents another parent created) — they have no beacon channel back to us,
+// so this is the coarse tmux transport, not the clean subagent path.
+function sendKeysToSession(sessionName: string, text: string): void {
+	const useFile = /[\n\r\t]/.test(text) || Buffer.byteLength(text, "utf8") > 1000;
+	let line = text;
+	if (useFile) {
+		const scratch = path.join(STATE_DIR, `msg-${sanitizeTmuxName(sessionName)}-${Date.now()}.md`);
+		fs.writeFileSync(scratch, text, { encoding: "utf8", mode: 0o600 });
+		line = `Read the file at ${scratch}. Treat its entire contents as your next user message and respond accordingly.`;
+	}
+	tmux(["send-keys", "-t", sessionName, "C-u"]);
+	tmux(["send-keys", "-t", sessionName, "-l", "--", line]);
+	tmux(["send-keys", "-t", sessionName, "Enter"]);
+}
+
+/** Snapshot a session's pane. Used to read back replies from sessions with no beacon. */
+function capturePane(sessionName: string, lines = 200): string {
+	try {
+		return tmux(["capture-pane", "-t", sessionName, "-p", "-S", `-${lines}`]);
+	} catch {
+		return "(unavailable)";
+	}
+}
+
+/** Working directory of a session's active pane, for session_list and worktree discovery. */
+function sessionCwd(sessionName: string): string | undefined {
+	try {
+		return tmux(["display", "-p", "-t", sessionName, "#{pane_current_path}"]) || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function currentSessionName(): string | undefined {
+	try {
+		return tmuxSessionName();
+	} catch {
+		return undefined;
+	}
+}
+
+// Poll a pane snapshot until it stops changing (a proxy for "the session finished
+// responding"), since independent sessions have no beacon to signal settle.
+async function waitForPaneQuiet(sessionName: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	let previous = capturePane(sessionName, 50);
+	let stableSince = 0;
+	for (;;) {
+		if (signal?.aborted) return false;
+		if (!sessionExists(sessionName)) return false;
+		await sleep(750, signal);
+		const current = capturePane(sessionName, 50);
+		if (current === previous) {
+			if (stableSince === 0) stableSince = Date.now();
+			if (Date.now() - stableSince >= 2000) return true;
+		} else {
+			stableSince = 0;
+			previous = current;
+		}
+		if (Date.now() >= deadline) return false;
+	}
+}
+
 /** Pointed, context-light summary of recent activity, used when no settled
  * response exists yet — a replacement for screen-scraping the pane. */
 function renderDigest(r: SubagentRecord, evs: BeaconEvent[]): string {
@@ -359,7 +507,7 @@ function destroySession(r: SubagentRecord): void {
 
 async function resolveTarget(
 	target: string | undefined,
-	ctx: any,
+	ctx: ExtensionContext,
 	createIfMissing: boolean,
 ): Promise<SubagentRecord> {
 	if (target) {
@@ -381,7 +529,7 @@ async function resolveTarget(
 		if (!createIfMissing) {
 			throw new Error("No subagent sessions exist. Create one with subagent_create or use subagent_run.");
 		}
-		return await createSession({ persistent: true, cwd: ctx.cwd });
+		return await createSession({ persistent: true, cwd: ctx.cwd }, ctx);
 	}
 
 	if (persistent.length === 1) {
@@ -394,7 +542,7 @@ async function resolveTarget(
 		const choice = await ctx.ui.select("Which subagent session?", options);
 		if (!choice) throw new Error("Cancelled session selection.");
 		if (choice === "Create a fresh one") {
-			return await createSession({ persistent: true, cwd: ctx.cwd });
+			return await createSession({ persistent: true, cwd: ctx.cwd }, ctx);
 		}
 		const matched = persistent.find((r) => labelOf(r) === choice);
 		if (matched) return matched;
@@ -471,6 +619,17 @@ const SendParams = Type.Object({
 			description:
 				"Interrupt and steer a running subagent instead of waiting for it to idle first. Use to correct a subagent flagged by an alert that is losing the plot. Default false.",
 		}),
+	),
+});
+
+const SessionSendParams = Type.Object({
+	target: Type.String({ description: "tmux session name to send to (from session_list), e.g. 'main' or 'sa-voice-abcd'." }),
+	text: Type.String({ description: "The message to type into that session." }),
+	wait: Type.Optional(
+		Type.Boolean({ description: "Wait for the pane to settle and return a snapshot of its reply. Default true." }),
+	),
+	timeoutMs: Type.Optional(
+		Type.Number({ description: "How long to wait for the pane to settle. Default 180000 (3 min)." }),
 	),
 });
 
@@ -554,7 +713,7 @@ export function registerManager(pi: ExtensionAPI): void {
 					persistent: params.persistent ?? true,
 					saveSession: params.saveSession ?? false,
 					extraArgs: params.extraArgs,
-				});
+				}, ctx);
 				return ok(
 					`Created subagent ${labelOf(r)} (persistent=${r.persistent}, cwd=${r.cwd}).`,
 					{ id: r.id, label: r.label, persistent: r.persistent, cwd: r.cwd, paneId: r.paneId },
@@ -746,7 +905,7 @@ export function registerManager(pi: ExtensionAPI): void {
 					cwd: params.cwd ?? ctx.cwd,
 					persistent: false,
 					saveSession: false,
-				});
+				}, ctx);
 			} catch (e: any) {
 				return err(e.message);
 			}
@@ -795,6 +954,71 @@ export function registerManager(pi: ExtensionAPI): void {
 					return `${lbl}(${r.id}) [${r.status}] ${r.persistent ? "persistent" : "ephemeral"} cwd=${r.cwd}`;
 				});
 			ctx.ui.notify(rows.join("\n"), "info");
+		},
+	});
+
+	pi.registerTool({
+		name: "session_list",
+		label: "Session: list",
+		description:
+			"List every pi session in this tau tmux server, not just subagents you spawned. Each row shows the tmux name, kind (subagent vs independent session), whether it is the current session, and its working directory. Use to find another running session (e.g. 'main') before messaging it with session_send.",
+		parameters: Type.Object({}),
+		async execute(_id, _params, _signal, _onUpdate, _ctx) {
+			if (!isTmuxAvailable()) return err("Not running inside tmux.");
+			const sessions = listTmuxSessions();
+			if (sessions.length === 0) return ok("No tmux sessions found.");
+			const rows = sessions.map((s) => {
+				const here = s.current ? " (you)" : "";
+				const cwd = sessionCwd(s.name);
+				return `- ${s.name} [${s.kind}]${here}${cwd ? ` cwd=${cwd}` : ""}`;
+			});
+			return ok(rows.join("\n"), { sessions });
+		},
+	});
+
+	pi.registerTool({
+		name: "session_send",
+		label: "Session: send",
+		description:
+			"Send a message to any pi session in this tmux server by its tmux name (from session_list) — including independent sessions and subagents another session spawned. This is the coarse transport: it types into the pane and screen-scrapes the reply. Prefer subagent_send for sessions you spawned; it has a clean response channel. When wait is true, returns a pane snapshot once the session settles.",
+		parameters: SessionSendParams,
+		async execute(_id, params, signal, _onUpdate, _ctx) {
+			if (!isTmuxAvailable()) return err("Not running inside tmux.");
+			const managed = findByIdOrLabel(params.target);
+			if (managed && sessionExists(managed.tmuxSession)) {
+				return err(
+					`"${params.target}" is a subagent you can reach with subagent_send, which has a clean response channel. Use that instead.`,
+				);
+			}
+			if (!sessionExists(params.target)) {
+				return err(`No tmux session named "${params.target}". Call session_list to see sessions.`);
+			}
+			if (params.target === currentSessionName()) {
+				return err("Refusing to send to your own session.");
+			}
+			try {
+				sendKeysToSession(params.target, params.text);
+			} catch (e: any) {
+				return err(e.message);
+			}
+			if (params.wait === false) return ok(`Sent to ${params.target}.`, { target: params.target });
+			const settled = await waitForPaneQuiet(params.target, params.timeoutMs ?? 180000, signal);
+			const snapshot = capturePane(params.target);
+			if (!settled) {
+				return err(`${params.target} still active after timeout. Latest pane:\n\n${spill(snapshot, OUTPUT_CAP, `pane-${sanitizeTmuxName(params.target)}`)}`, { target: params.target, timedOut: true });
+			}
+			return okOutput(snapshot, { target: params.target });
+		},
+		renderCall(args, theme) {
+			const preview = args.text ? (String(args.text).length > 60 ? String(args.text).slice(0, 60) + "..." : String(args.text)) : "...";
+			return new Text(
+				theme.fg("toolTitle", theme.bold("session_send ")) +
+					theme.fg("accent", String(args.target)) +
+					"\n  " +
+					theme.fg("dim", preview),
+				0,
+				0,
+			);
 		},
 	});
 

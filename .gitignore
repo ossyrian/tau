@@ -6,13 +6,12 @@ zshrc
 vimrc
 
 # runtime state
+tools/md2html/node_modules/
 workspaces.conf
 
-# live mounts that the harness has access to at runtime
-scripts/*
-workspace/*
-!scripts/README.md
-!workspace/README.md
+# pre-1.0 live mounts; state now lives under ~/.tau
+scripts/
+workspace/
 
 # pi-config is mostly runtime state + user customization, but tau-standard
 # functionality (skills, extensions, seeded config) ships with the repo.
@@ -27,10 +26,14 @@ pi-config/agent/skills/*
 !pi-config/agent/skills/tau
 !pi-config/agent/skills/tau-runtime
 !pi-config/agent/skills/tau-git-shipping
-!pi-config/agent/skills/tau-share
 !pi-config/agent/skills/subagent-sessions
 !pi-config/agent/skills/glossary-maintenance
 !pi-config/agent/skills/index-maintenance
+!pi-config/agent/skills/review-local-code
+!pi-config/agent/skills/tau-share
+!pi-config/agent/skills/tau-live-debug
+!pi-config/agent/skills/tau-annotate
+!pi-config/agent/skills/tau-slack
 
 # tau-standard extensions (user-added ones — status lines etc. — stay ignored)
 !pi-config/agent/extensions
@@ -44,9 +47,13 @@ pi-config/agent/extensions/*
 !pi-config/agent/extensions/workspace-tools
 !pi-config/agent/extensions/subagent-sessions
 !pi-config/agent/extensions/tau-splash.ts
+!pi-config/agent/extensions/live-bridge
 
 # seeded treehouse config (hooks are commented examples; user edits are theirs
 # to commit or not)
 !pi-config/agent/treehouse
 
 .DS_Store
+
+# built by `make`
+/tau

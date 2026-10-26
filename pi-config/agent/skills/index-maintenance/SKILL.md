@@ -33,7 +33,7 @@ Update the relevant index as a side effect of changing the directory. No cron, n
 `name → what it is → when to reach for it`. One line each. Enough for a future session to decide whether to open it, no more.
 
 ```markdown
-- `rds_connect` — opens a psql shell to an RDS instance (dev/preprod/prod). Reach for it before hand-rolling a DB connection.
+- `db_connect` — opens a psql shell to the project database. Reach for it before hand-rolling a DB connection.
 - `my_repo` — A git repository.
 ```
 

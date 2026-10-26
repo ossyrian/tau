@@ -4,9 +4,7 @@
  * Intercepts bash tool calls and blocks:
  *   1. ANY git command touching ~/share (the host<->container dropbox is not
  *      a git working tree; the user is the git gate for anything there).
- *   2. `git push` to anything other than the `no-mistakes` remote — work
- *      ships through the gate pipeline, not straight to origin.
- *   3. Merges of PRs (`gh pr merge`, merge via `gh api`) — merging is the
+ *   2. Merges of PRs (`gh pr merge`, merge via `gh api`) — merging is the
  *      user's hand, always.
  *
  * Block reasons re-teach the correct path at the moment it's needed. This
@@ -23,7 +21,8 @@ import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 
 // The share dropbox: ~/share in the container, bind-mounted from ~/.tau/share
 // on the host. Match both the literal path and the ~ form the agent might type.
-const SHARE_PATHS = ["/home/pi/share", "/root/share"];
+// Each profile is its own user, so its share dir is under its own home.
+const SHARE_PATHS = [`${process.env.HOME ?? "/home/pi"}/share`, "/home/pi/share", "/root/share"];
 const SHARE_TARGET = "~/share";
 
 /** Split a shell command into segments at unquoted-ish separators. Heuristic:
@@ -64,38 +63,19 @@ export function analyzeCommand(command: string, cwd: string): Verdict {
 			block: true,
 			reason:
 				"git is forbidden in ~/share — it's the host dropbox, not a git working tree. " +
-				"Use the share_file tool (or just write files into ~/share) to hand things to the user; " +
-				"if you genuinely need git on a repo, work in /workspace, not ~/share. " +
+				"~/share is only for files to share with the user; " +
+				"if you need git on a repo, work in /workspace. " +
 				"(If your git command was for a different path, split it from anything mentioning ~/share.)",
 		};
 	}
 
 	for (const segment of segments) {
-		const git = isGitInvocation(segment);
-
-		// Rule 2: pushes go through the no-mistakes gate.
-		if (git && /\bpush\b/.test(segment)) {
-			// Allowed: pushing to the gate remote.
-			const pushesToGate = /\bpush\b[^|;&]*\bno-mistakes\b/.test(segment);
-			if (!pushesToGate) {
-				return {
-					block: true,
-					reason:
-						"Direct pushes are blocked — ship through the gate instead: commit on a branch, then " +
-						'`no-mistakes axi run --intent "<the user\'s goal>"` (or `git push no-mistakes <branch>`). ' +
-						"The run ends with a PR open and CI green; stop there and tell the user. " +
-						"If this push is genuinely gate-exempt (e.g. first push of a brand-new repo), ask the user — " +
-						"they can disable this guard for the session with /git-guard off.",
-				};
-			}
-		}
-
-		// Rule 3: merging is the user's hand.
+		// Rule 2: merging is the user's hand.
 		if (/\bgh\s+pr\s+merge\b/.test(segment) || (/\bgh\s+api\b/.test(segment) && /\/merge\b/.test(segment))) {
 			return {
 				block: true,
 				reason:
-					"Merging PRs is reserved for the user. Your stopping point is the open PR with CI green — " +
+					"Merging PRs is reserved for the user. Your stopping point is the open PR — " +
 					"report it and stop.",
 			};
 		}

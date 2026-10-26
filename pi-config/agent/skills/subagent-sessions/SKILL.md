@@ -1,6 +1,6 @@
 ---
 name: subagent-sessions
-description: Delegate work to other pi sessions running in this same harness (tmux), via the subagent-sessions extension. Use when the user wants to pipe your output to another pi session (e.g. "reformat this text using the voice skill"), spawn a "subagent" to do a task in its own context, keep a persistent helper session around for reuse, or send text to an existing session. Covers choosing which session to use, and persistent vs ephemeral.
+description: Delegate work to other pi sessions running in this tmux harness. Use to pipe your output to another session (e.g. "reformat this with the voice skill"), spawn a subagent to work in its own context, keep a persistent helper session for reuse, send text to an existing session, or message another running session. Covers persistent vs ephemeral, cross-session messaging, and the subagent model rules.
 ---
 
 # Subagent sessions
@@ -20,11 +20,38 @@ The user sometimes calls this workflow "subagent". Existing skills (e.g. the voi
 | `subagent_read` | Return the latest response without waiting. `raw: true` returns a tmux pane snapshot for debugging. |
 | `subagent_list` | List managed sessions with id, label, status, cwd. |
 | `subagent_destroy` | Kill a session (kills its tmux session). `all: true` destroys every session. |
+| `session_list` | List **every** pi session in this tmux server, not just ones you spawned — name, kind (subagent/session), whether it's you, and cwd. |
+| `session_send` | Message any session by its tmux name, including independent sessions. Coarse: types into the pane and screen-scrapes the reply. |
 | `subagent_alert_add` | Register a regex watched against live subagent output; fires a pointed alert into your context on match with a steer hint. |
 | `subagent_alert_remove` | Deregister an alert by id, by pattern, or all. Safe to call while subagents run. |
 | `subagent_alert_list` | List registered alerts (id, pattern, flags, label, target, cooldown). |
 
 `subagent_send` returns the subagent's final response text when `wait: true` (the default). That text is the subagent's settled answer, captured directly from its beacon stream — not screen-scraped. A large answer is truncated inline and the full text spilled to a temp file (the reply names the path); read or grep that file when you need the rest, rather than carrying it all in context.
+
+## Choosing the model for a subagent
+
+`subagent_create` and `subagent_run` take an optional `model` (a configured id like `claude-sonnet-5` or a `provider/model` like `litellm/gpt-5.6-sol`, with an optional `:thinking` suffix). The extension validates it against your session's configured models before spawning:
+
+- **Unknown model** → the tool errors and lists the configured models. Pick one from that list.
+- **Ambiguous id** (same id under several providers) → the tool errors; qualify it as `provider/model`.
+- **No valid credentials** for the model's provider → the tool errors instead of spawning a session that would fail on its first turn.
+- **Omit `model`** → the subagent inherits your own model.
+
+The subagent's provider credentials are resolved from the model config and passed in explicitly, so a subagent never picks up stray or wrong credentials from the environment. Do not pass `--api-key`, `--model`, or `--provider` through `extraArgs` — the extension rejects them; set `model` instead.
+
+## Messaging another running session
+
+The registry only tracks subagents **you** spawned. Other sessions — ones the user started (e.g. `main`), or subagents another session spawned — are not in it, so `subagent_send` can't reach them. Two tools cover this:
+
+- `session_list` enumerates every pi session in the tmux server with its kind and cwd. Use it to find the session you mean before messaging it.
+- `session_send { target, text }` types into that session's pane and, by default, waits for the pane to settle and returns a snapshot of the reply.
+
+```
+session_list
+session_send { target: "main", text: "Can you rebase your branch onto main?" }
+```
+
+This is the **coarse** channel: it screen-scrapes the pane rather than reading a clean beacon stream, so the reply is a pane snapshot and may need a moment to settle. For a session you spawned yourself, use `subagent_send` — it has the clean channel. If you point `session_send` at a subagent you own, it tells you to use `subagent_send` instead.
 
 ## Piping your own output to a subagent
 
@@ -113,7 +140,7 @@ Keys: `h/l` (or `tab`/`shift+tab`) switch panels, `j/k` move within, `g/G` top/b
 
 ## Caveats
 
-- Subagents share your container: same filesystem, same skills, same extensions, same AWS creds (read-only). They can read and edit files. Treat a subagent like another instance of yourself, not a sandbox.
+- Subagents share your container: same filesystem, same skills, same extensions. They can read and edit files. Treat a subagent like another instance of yourself, not a sandbox.
 - Don't have a subagent spawn its own subagents by default; nested delegation is not set up and gets confusing fast.
 - Long tasks: the default wait timeout is 3 minutes. Raise `timeoutMs` for big jobs, or send with `wait: false` and poll with `subagent_wait`.
 - To watch a subagent live, the user can switch tmux sessions in their terminal (or see them via `tau session list`).

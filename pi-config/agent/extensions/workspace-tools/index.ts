@@ -13,7 +13,9 @@ import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const ROOT = "/workspace";
+// A profile with isolated workspaces has its own directory under its home;
+// tau sets TAU_WORKSPACE for it.
+const ROOT = process.env.TAU_WORKSPACE || "/workspace";
 
 function ok(text: string, details: Record<string, unknown> = {}) {
 	return { content: [{ type: "text" as const, text }], details };

@@ -1,128 +1,146 @@
 # Agents Guide — Tau
 
-Docker sandbox that runs Pi with short-lived, readonly-scoped AWS credentials and persistent mounts for config, skills, and project copies.
+Docker sandbox that runs Pi. The agent holds **no credentials**: credentialed CLIs run as *proxies* in a separate process the agent cannot read. Persistent mounts keep config, skills, and project copies across restarts.
 
 ## Architecture
 
-- **Readonly AWS credentials** (short-lived, scoped) — you cannot escalate or reach production
-- **Persistent mounts** (all under host `~/.tau/`): `~/.pi/agent/` (config, skills), `/workspace/` (project copies / live mounts), `~/scripts/` (reusable scripts), `~/share/` (file dropbox back to the host)
-- **Ephemeral container**: recreated on restart; tmpfs credentials are wiped
+- **No credentials in the agent's reach.** Host environment variables are not passed in. A credentialed CLI (`aws`, `gh`, ...) is a *proxy*: the agent types the command, a shim forwards it to a server that runs as another OS user, and the agent gets the output only.
+- **Profiles** are OS users in one container. Each has its own `config.yaml`, `pi/` directory, packages, skills, env, sessions, and (optionally) workspace. Homes are mode 700.
+- **Persistent mounts** (host `~/.tau/`, or `~/.tau/profiles/<name>/` for a named profile): `~/.pi/` (config, skills), the workspace, `~/scripts/`, `~/share/`
+- **Ephemeral container**: recreated on restart; nothing secret is written to its disk
 
-Short-lived creds and ephemeral storage block accidental production writes and credential leaks; the mounts keep the sandbox useful for real dev and debugging work across your services.
+Ephemeral storage blocks accidental production writes, and keeping credentials out of the agent's reach blocks leaks. The mounts keep the sandbox useful for real dev and debugging work.
 
-## Agent Execution Model
-
-### Starting an Agent Session
-
-```bash
-tau session new [NAME]
-```
-
-Starts a new Pi conversation in the container. Sessions run in tmux, detach with `Ctrl-b d`, and reattach with `tau session attach <name>`. List all sessions with `tau session list`.
-
-### Agent Configuration
-
-All agent configuration lives under `~/.pi/agent/` (host-mounted, persistent):
-
-| File | Purpose | Reload Timing |
-|------|---------|---------------|
-| `settings.json` | Pi settings | Session start |
-| `models.json` | LLM providers and models | When `/model` invoked |
-| `APPEND_SYSTEM.md` | System prompt extension | Next session start |
-
-### Mounting External Skills
-
-Share skills from your local machine via `skills.conf`:
+## Profiles
 
 ```bash
-tau skills
+tau profile list                     # list profiles (the default is always first)
+tau profile new work                 # create ~/.tau/profiles/work/{config.yaml,pi/}
+tau profile workspaces work shared   # share the default's workspace, or: isolated
+tau -p work status                   # act as a profile (or TAU_PROFILE=work)
 ```
 
-This opens `skills.conf` in your editor. List host directories to bind-mount into the container at `~/.pi/agent/skills/`. Changes take effect on the next session start.
+The **default** profile uses `~/.tau/` itself and user `pi`. Another profile `NAME` uses `~/.tau/profiles/NAME/` and user `p-NAME`. There is one image and one container, so:
 
-## Workspaces: Managing Projects
+- `as: root` packages are shared: every profile sees the union.
+- `as: user` packages, Pi config, skills, env vars, sessions and proxy choices belong to one profile.
+- Adding a profile or a root package needs `tau build` then `tau restart`.
+- `tau build` covers every profile and refuses while any profile has unresolved drift.
 
-Tau exposes your projects at `/workspace/<name>` inside the container in one of two modes:
+`workspaces.mode` in a profile's `config.yaml` is `isolated` (default: its own workspace under its home) or `shared` (the default profile's workspace, via the `tau-shared` group). A profile with an isolated workspace cannot read the shared one.
+
+## Workspaces
+
+A profile's workspace is the directory the agent works in. It is a bind mount of a host directory, so you and the agent see the same files. The agent sees it at `/workspace`.
+
+```yaml
+workspaces:
+  mode: isolated              # or shared; see below
+  live:                       # real directories mounted into the workspace
+    myproject: ~/dev/myproject
+```
 
 ```bash
-tau workspace add [DIR] [--name NAME] [--cd] [--live]  # Add (copy by default; --live = shared)
-tau workspace list                                     # List all (shows mode: copy/live)
-tau workspace cd <name>                                # Switch (needs tau.fish sourced)
-tau workspace remove <name>                            # Delete the copy / unregister a live mount
+tau workspace add [DIR] [--name NAME] [--live] [--cd]   # DIR defaults to the current directory
+tau workspace list
+tau workspace rm NAME
+tau workspace cd [NAME]       # prints the directory on this machine (tau.fish / tau.bash cd to it)
 ```
 
-**`copy` (default)** — the source is cloned into the live-mounted `workspace/` dir
-(filesystem clone where supported, e.g. macOS APFS clonefile — instant and near-zero
-space; falls back to a real copy on other filesystems). Visible to the agent immediately, no restart. Edits stay in the
-container copy and don't sync back to source. Re-adding merges source changes in via
-rsync. The container can't see your original project directories — only the copy.
+Each entry is one of two kinds:
 
-**`--live`** — your real source is bind-mounted directly at `/workspace/<name>`, so the
-agent reads and writes the same tree you do. Bidirectional, no copy, no isolation: agent
-edits land on your machine immediately. Because this changes container mounts, it applies
-on the next `tau restart` (running sessions are lost) — the same rule as `skills.conf`.
-Removing a live workspace unmounts it on the next restart; the source is never deleted.
+- **Copy** (the default). The directory is cloned into the workspace (a filesystem clone on macOS APFS: instant, almost no space). The agent edits the copy and your original is never changed. A copy shows in the running container at once. Adding the same directory again merges your changes in with rsync and keeps files only the copy has. `rm` deletes the copy and everything the agent changed in it.
+- **Live** (`--live`). Your real directory is bind-mounted at `/workspace/NAME`, so the agent can edit or delete your files. It is recorded under `workspaces.live` in `config.yaml`. Docker cannot change a running container's mounts, so `add --live` and `rm` of a live entry take effect on the next `tau restart` (running sessions are lost). `rm` never touches your directory.
 
-Use `copy` when the agent should experiment safely on a throwaway snapshot; use `--live`
-when you want the agent to place files somewhere accessible on your machine, or to work
-against your real tree.
+`add` and `cd` print only the host path on stdout. Messages go to stderr, so the shell wrappers and scripts can use the output.
 
-## Credential Scoping and Refresh
+Which workspace a profile gets:
 
-### Setup
+- **`isolated`** (the default for a named profile): its own `workspace/` under its profile directory, mounted in its own mode-700 home. No other profile can read it.
+- **`shared`**: the default profile's workspace. Every shared profile and the default profile see the same files. `tau profile workspaces NAME shared|isolated` sets it; it needs `tau build` and `tau restart`.
 
-> AWS access is optional. Skip this section entirely if you don't need AWS inside the container — `tau start` works without `PI_AWS_PROFILE`. The scoping below only matters when you choose to use it.
+Each profile has its own `workspaces.live` list. A proxy with `runs_in: agent_directory` runs only from inside the shared workspace, so it runs any hook planted in a live directory mounted there.
 
-1. Create an AWS profile that can only assume the readonly role (not the write role):
-   ```bash
-   aws configure --profile readonly-tau
-   ```
-2. Verify the profile is truly readonly. If it can assume write, the sandbox is pointless.
-3. Log in if SSO:
-   ```bash
-   aws sso login --profile readonly-tau
-   ```
+## Proxies
 
-### Credential Flow
+A proxy is a credentialed CLI the agent can call but cannot read. The software, the credentials and the process that runs it are all out of the agent's reach.
 
-The container never holds your AWS credentials directly. Instead, `tau` resolves fresh temp credentials on the host and pipes them into a tmpfs in the container:
+Define proxies once, in the **default** profile's `config.yaml`. Each profile chooses which it may call. Three fields say where the software is, which file runs, and what the agent types:
+
+| Field | Meaning |
+|---|---|
+| `package` + `binary` | A **hidden package** from `proxies.packages`, and the file to run inside it (`bin/aws`, relative to the package's `$PREFIX`). |
+| `system_binary` | Or: an absolute path to a program already on the system (`/usr/bin/git`). Set this or `package` with `binary`, never both. |
+| `agent_command` | The only name the agent sees: the shim it types. Required. |
+| `runs_in` | `empty_directory` (default) or `agent_directory`. |
+| `env_from` | A command run **on the host** that prints `KEY=VALUE` lines: short-lived credentials (SSO, assume-role). |
+| `deny` | Argument sequences the proxy refuses. |
+
+```yaml
+proxies:
+  packages:                            # hidden installs: the agent cannot run or read them
+    aws-cli:
+      check: test -x "$PREFIX/bin/aws"
+      script: |
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/a.zip
+        unzip -q /tmp/a.zip -d /tmp && /tmp/aws/install -i "$PREFIX" -b "$PREFIX/bin"
+  defs:
+    aws-prod:                          # a label for `tau proxy allow`, `env`, `refresh`; the agent never sees it
+      package: aws-cli
+      binary: bin/aws
+      agent_command: aws
+      env_from: aws configure export-credentials --profile prod-ro --format env
+      deny: [configure export-credentials, --debug]
+    aws-dev:
+      package: aws-cli                 # same install, its own credentials and process
+      binary: bin/aws
+      agent_command: aws
+      env_from: aws configure export-credentials --profile dev-admin --format env
+    git:
+      system_binary: /usr/bin/git
+      agent_command: git
+      runs_in: agent_directory
+  active: [aws-dev, git]               # per profile; the default profile here
+```
+
+```yaml
+# ~/.tau/profiles/prod/config.yaml
+proxies:
+  active: [aws-prod]                   # only prod's credentials
+```
+
+A profile cannot activate two proxies with the same `agent_command`: `tau proxy allow` refuses the second.
 
 ```bash
-PI_AWS_PROFILE=readonly-tau tau start  # Creds are refreshed into /home/pi/.tau/credentials
-# PI_AWS_PROFILE is optional — omit it to run without AWS. Set it at start,
-# session, shell, or refresh to push creds into the (running) container.
+tau proxy list                            # definitions, what the agent types, and whether this profile uses each
+tau proxy allow gh / tau proxy disallow gh   # per profile
+tau proxy env set aws-prod AWS_REGION eu-west-1
+tau proxy env list aws-prod [--show]        # values are masked unless --show
+tau proxy refresh [PROXY...]              # mint fresh credentials; all in use if none named
+tau proxy reload                          # push stored variables and choices; mints nothing
 ```
 
-Credentials are short-lived (typically 15 minutes for SSO + assume-role). Refresh manually without restarting:
+**Credentials and refresh.** `env_from` runs on the host at `tau start` and on `tau proxy refresh`. It never runs on `env set`, `allow`, `disallow` or `reload`: those keep the credentials a server already holds. `tau proxy refresh aws-prod` runs only `aws-prod`'s `env_from` and reloads only its server, so only the profiles that use it see new credentials. If `env_from` fails, every server keeps its old credentials and the error names the proxy. Nothing refreshes on a timer: re-run `refresh` when a credential expires.
 
-```bash
-tau refresh
-```
+**What needs a rebuild.** Only `proxies.packages` and a proxy's `binary` (they install into the image). Adding, removing or changing a proxy, its secrets, `deny`, `env_from` or `allow` needs no rebuild and no restart; `tau proxy reload` applies it.
 
-Running Pi sessions keep working across a refresh.
+**Isolation.** Each used proxy has its own OS user (`tx-<name>`, uid 30000-49999), its own server process and its own socket directory. A profile reaches a server only if the kernel says its uid is allowed (`SO_PEERCRED`). Secrets go to a server on stdin through a private pipe, live in that server's memory, and are never written to the container's disk or an argument list. Another uid cannot read a process's `/proc/<pid>/environ` or memory, and `--security-opt no-new-privileges` stops a setuid binary from changing that. So a profile that cannot call `aws-prod` cannot read its credentials even by exploiting another proxied CLI.
 
-### IMDS Bypass on EC2
+Hidden packages install as root into `/opt/tau/proxy-packages/<name>`, mode 750, group `tau-proxies`. Profile users are not in that group, so they can neither run nor read the software. The build fails if a proxy's `binary` is missing after the install. A proxy runs with an empty environment plus its own variables, in a private temp directory.
 
-On EC2, the container can reach the host's IAM role via `169.254.169.254` (the metadata service) and bypass scoping. Prevent this by setting the host IMDS hop limit to 1:
-
-```bash
-curl -X PUT "http://169.254.169.254/latest/api/token" \
-  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
-  -H "Token-Required: true"
-```
-
-Or block link-local traffic from the container network.
+**What this protects against.** The goal is to keep credentials out of the agent's context and environment. It does not stop an agent that deliberately runs code as the proxy user. For `runs_in: agent_directory`, the proxy runs whatever the agent left in that directory (git hooks, `.git/config` helpers), with the credentials in its environment. Rely on narrowly scoped credentials and on the service (GitHub branch protection, IAM) for the real limits. With `workspaces.mode: shared` between profiles that hold different credentials, those credentials are only as separate as the shared files.
 
 ## Container Lifecycle
 
 ### Commands
 
 ```bash
-tau start      # Create and start the container, push fresh creds
+tau start      # Create and start the container and the proxy servers
 tau stop       # Stop (sessions are lost)
 tau restart    # Restart (sessions are lost)
-tau shell      # Open an interactive zsh shell
-tau refresh    # Re-push fresh creds without restart
+tau status     # container, image, packages, skills, profile
+tau build      # build the image from every profile's packages
+tau            # with -i / on a terminal: the interactive interface
 ```
 
 ### Persistence Model
@@ -133,9 +151,7 @@ tau refresh    # Re-push fresh creds without restart
 | `/workspace/` | ✅ Yes | Project copies and live mounts (host `~/.tau/workspace`) |
 | `~/scripts/` | ✅ Yes | Shell scripts (host `~/.tau/scripts`) |
 | `~/share/` | ✅ Yes | File dropbox to the host (host `~/.tau/share`) — the way to hand files back |
-| `~/.treehouse/` | ✅ Yes | Treehouse worktree pools (named Docker volume `tau-treehouse`) |
-| `~/.no-mistakes/` | ✅ Yes | no-mistakes state: gate repos, runs, SQLite (named volume `tau-nm-home`) |
-| `~/.tau/` (container) | ❌ No | AWS credentials (tmpfs, wiped on recreate) |
+| `~/.treehouse/` | ✅ Yes | Treehouse worktree pools (host `~/.tau/treehouse`, `PI_TREEHOUSE`) |
 | `/tmp/`, `/home/pi` (rest) | ❌ No | Lost on restart |
 
 All host-side state lives under `~/.tau/` on the user's machine (`~/.tau/pi`,
@@ -143,29 +159,27 @@ All host-side state lives under `~/.tau/` on the user's machine (`~/.tau/pi`,
 container-side `~/.tau/` above is a different path (a tmpfs for creds) — don't
 conflate them.
 
-To hand a file back to the user's machine, write it into `~/share` (or use the
-`share_file` tool). It's the only file channel out of the sandbox.
-
-A restart kills any in-flight no-mistakes pipeline run (crash recovery marks it
-failed). Check `no-mistakes axi status` before restarting.
+To hand a file back to the user's machine, write it into `~/share`. It's the only
+file channel out of the sandbox.
 
 ## Git, GitHub, and Shipping Work
 
-The container has real git access, authenticated **as the user**: HTTPS + the
-`GITHUB_TOKEN` PAT from `.env`, via the credential helper in the mounted
-`~/.gitconfig`. `gh` reads the same token. There are no SSH keys.
+The agent has real git access, authenticated **as the user**: HTTPS + a
+`GITHUB_TOKEN` PAT. `git` and `gh` are proxies with `runs_in: agent_directory`, so they
+run only inside the workspace. Their token, identity (`user.name`, `user.email`) and
+credential helper live in `~/.tau/secrets/git.env` and `gh.env` as `GITHUB_TOKEN` and
+`GIT_CONFIG_*` variables. The container has no `~/.gitconfig` and no token in its
+environment. There are no SSH keys. The agent's `umask` is 002, so the proxy users (in the
+workspace group) can write what the agent wrote.
 
 The workflow:
 
 1. Clone with plain `git clone https://github.com/org/repo` (auth is automatic).
 2. Use **treehouse** for pooled, disposable worktrees — pool off container-local
-   clones only. Hook config lives at `~/.pi/agent/treehouse/config.toml`
+   clones only. The pool lives in the repo (`root = "."`), so git can reach it. Hook config lives at `~/.pi/agent/treehouse/config.toml`
    (persistent, host-editable at `pi-config/agent/treehouse/`).
-3. Ship through **no-mistakes**: `no-mistakes init` once per repo, then
-   `no-mistakes axi run --intent "..."` from a branch. The run validates
-   (review/test/docs/lint), pushes, opens a PR, and watches CI. The agent stops at
-   `outcome: checks-passed` — the user reviews and merges the PR. The `/no-mistakes`
-   skill (installed into Pi's skills by `init`) is the driving guide.
+3. Commit on a branch, push it, and open a PR with `gh pr create`. The agent stops at
+   the open PR — the user reviews and merges it.
 
 Enforcement is at GitHub — PAT scope plus branch protection — not in the container.
 
@@ -230,6 +244,30 @@ Skills can include scripts in a `scripts/` subdirectory, documented in `SKILL.md
 ~/.pi/agent/skills/my-skill/scripts/helper.sh
 ```
 
+## Live Debug Sessions (impeccable, optional)
+
+Requires the [impeccable](https://impeccable.style) skill mounted via `skills.conf`; the
+`live-bridge` extension is a no-op without it. `impeccable live` runs a helper in the container that the user's browser talks to
+(ports in `PI_PORTS`). The bundled `live-bridge` extension wakes the agent when a
+browser event is queued with no poll running. To close every live session:
+
+```bash
+tau live status   # helpers, connected browsers, queued events
+tau live stop     # stop all helpers, strip injected live.js, kill stray polls
+```
+
+Inside pi: the `live_stop` tool (so you can tell the agent "close the debug
+sessions") or the `/live-stop` command. See the `tau-live-debug` skill.
+
+## Commenting on Reports
+
+```bash
+tau annotate reports/q3.html   # host: open a ~/share HTML file with a comment overlay
+```
+
+Comments on selected text or a section arrive as `[annotate] Feedback on ...` messages
+in a session. See the `tau-annotate` skill.
+
 ## Talking to Other Sessions
 
 Multiple Pi sessions run in the same tmux server.
@@ -261,12 +299,6 @@ docker rm tau                     # Remove if in bad state
 tau start                         # Retry
 ```
 
-### Credentials are expired
-
-```bash
-tau refresh    # Refresh without restarting
-tau restart    # Or restart the container
-```
 
 ### A workspace isn't visible in the container
 
@@ -284,7 +316,7 @@ Skills are scanned at session start. If you created a skill mid-session, end it 
 
 The container only has access to:
 
-- Projects at `/workspace/<name>` — either copied (cloned from your source) or `--live` (your real source, bind-mounted read/write)
+- Projects at `/workspace/<name>`: a copy of your source, or a `--live` mount of your real source (read/write)
 - Files under `~/.pi/agent/`, `~/scripts/`
 
 To work with a project, add it as a workspace:
@@ -298,21 +330,14 @@ cd /workspace/myproject  # Then work there
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `PI_AWS_PROFILE` | Readonly AWS profile (optional; set to use AWS inside the container) | `readonly-tau` |
+| `TAU_PROFILE` | Profile to act as (also `-p NAME`) | `work` |
+| `TAU_CONTAINER` | Container name | `tau` (default) |
+| `TAU_IMAGE` | Image tag | `tau:latest` (default) |
 | `PI_CMD` | Command to start a Pi session | `pi` (default) |
-| `AWS_REGION` | AWS region for cred refresh | `us-east-1` (default) |
 | `TAU_HOME` | Host state root for all per-user files | `~/.tau` (default) |
-| `PI_SCRIPTS` | Host directory of reusable scripts to mount | `~/.tau/scripts` |
-| `PI_WORKSPACE` | Host directory for project copies | `~/.tau/workspace` |
-| `PI_SHARE` | Host directory for the file dropbox | `~/.tau/share` |
-| `PI_CONFIG` | Host directory for Pi config and skills | `~/.tau/pi` |
-| `PI_SKILLS_CONF` | Path to skills mount config | `~/.tau/skills.conf` |
-| `PI_WORKSPACES_FILE` | Path to workspaces registry | `~/.tau/workspaces.conf` |
-| `PI_ENV_FILE` | Path to the injected `.env` | `~/.tau/.env` |
-| `PI_GITCONFIG` | Path to the container git identity | `~/.tau/.gitconfig` |
+| `PI_PORTS` | Container ports published to host `127.0.0.1` and relayed from loopback (`tau-relay`) | `8400-8409` (default) |
 
-All default under `TAU_HOME` (`~/.tau`); each `PI_*` var overrides its single path.
-Legacy checkouts that kept state next to the CLI can relocate it with `tau migrate`.
+Each profile keeps its files in its own directory: `~/.tau` for the default profile, `~/.tau/profiles/NAME` for another. The Go `tau` has no per-path overrides: set `TAU_HOME` to move everything.
 
 ## Image and Build
 
@@ -325,30 +350,28 @@ The Docker image (`tau:latest`) bundles:
 To rebuild:
 
 ```bash
-./build.sh
+tau build
 ```
 
-To override Pi's install command:
+The image holds only what Tau needs: zsh, tmux, curl, socat, Node, Pi, treehouse and `tau-proxy`. Everything else (git, gh, ripgrep, jq, Python, uv, terraform, Playwright, md2html, and so on) is a package in `config.yaml`.
 
-```bash
-PI_INSTALL="my_custom_pi_install" ./build.sh
-```
+`md2html` is a package like the others. The Dockerfile only copies its source to `/opt/tau/tools/md2html`, because a package script cannot read the build context.
 
 ## Security Boundaries
 
 **Credentials** are the real boundary. Docker namespaces are a soft boundary (fine for this threat model; not designed to stop kernel exploits). Tau's security comes from:
 
 1. **IAM scoping** — the readonly profile can't escalate to write permissions
-2. **Token scope** — external tokens (`.env` values) are scoped and time-limited
+2. **Proxies** — credentials live in memory of a separate OS user; the agent gets output only
 3. **Ephemeral storage** — credentials live on tmpfs, wiped on container recreate
 
-**You must set up the IAM side** (if you use `PI_AWS_PROFILE`). If your profile can assume a write role, tau gives you no sandbox guarantee. Omit `PI_AWS_PROFILE` entirely to run without AWS access.
+**Scope the credentials you give a proxy.** A proxy keeps the agent from reading them, not from using them: if the profile behind `env_from` can write to production, so can the agent.
 
 ## Quick Reference
 
 ```bash
-# Start the sandbox (omit PI_AWS_PROFILE to run without AWS)
-PI_AWS_PROFILE=readonly-tau tau start
+# Start the sandbox
+tau start
 
 # Start a Pi session inside
 tau session new
@@ -368,8 +391,6 @@ tau workspace add ~/dev/myproject --name myproject
 # Open a shell in the container
 tau shell
 
-# Refresh creds without restart
-tau refresh
 
 # Stop everything
 tau stop
