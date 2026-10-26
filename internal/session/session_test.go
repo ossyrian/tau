@@ -481,3 +481,41 @@ func TestASessionsPathHasTheShimsFirstAndItsOwnHome(t *testing.T) {
 		t.Errorf("another profile's home is on the PATH: %q", cmd)
 	}
 }
+
+func TestShellArgsOpenZshAsTheProfileUserWithTheSessionEnvironment(t *testing.T) {
+	f := &fake{running: true}
+	m, _ := newMgr(f)
+	m.Home = "/home/pi"
+	m.Workspace = "/workspace"
+	m.Env = func() ([]string, error) { return []string{"A=1"}, nil }
+	got, err := m.ShellArgs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"exec", "-it", "-e", "A=1", "-e", "PATH=" + Path("/home/pi"), "-w", "/workspace", "-e", "TAU_WORKSPACE=/workspace",
+		"-u", "pi", "tau", "sh", "-c", "umask 002 && exec zsh"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestShellRunsOnTheTerminalAndNeedsARunningContainer(t *testing.T) {
+	f := &fake{running: true}
+	m, _ := newMgr(f)
+	if err := m.Shell(); err != nil || len(f.attached) != 1 {
+		t.Fatalf("err %v attached %v", err, f.attached)
+	}
+	stopped := &fake{running: false}
+	m2, _ := newMgr(stopped)
+	if err := m2.Shell(); err == nil || !strings.Contains(err.Error(), "tau start") || len(stopped.attached) != 0 {
+		t.Errorf("err %v attached %v", err, stopped.attached)
+	}
+}
+
+func TestShellFailsWhenTheEnvironmentCannotBeRead(t *testing.T) {
+	m, _ := newMgr(&fake{running: true})
+	m.Env = func() ([]string, error) { return nil, errors.New("bad env file") }
+	if _, err := m.ShellArgs(); err == nil || !strings.Contains(err.Error(), "bad env file") {
+		t.Errorf("got %v", err)
+	}
+}

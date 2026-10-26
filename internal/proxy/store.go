@@ -57,7 +57,7 @@ func (s *Store) reload(what string) error {
 		return nil
 	}
 	if err := s.Servers.Reload(); err != nil {
-		return fmt.Errorf("%s saved, but the proxy servers did not reload: %w (tau proxy reload retries)", what, err)
+		return fmt.Errorf("%s saved, but the proxy servers did not reload: %w (tau proxies reload retries)", what, err)
 	}
 	return nil
 }

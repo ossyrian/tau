@@ -23,7 +23,7 @@ type Docker interface {
 	Run(args ...string) error
 }
 
-// Manager runs the `tau session` commands for one profile. Every tmux command
+// Manager runs the `tau sessions` commands for one profile. Every tmux command
 // runs as the profile's user, so each profile has its own tmux server and its
 // sessions are invisible to the others.
 type Manager struct {
@@ -274,7 +274,7 @@ func (m *Manager) Kill(name string) (string, error) {
 		return "", err
 	}
 	if name == "" {
-		return "", errors.New("usage: tau session kill <name>")
+		return "", errors.New("usage: tau sessions kill <name>")
 	}
 	full, err := m.resolve(name)
 	if err != nil {
@@ -293,7 +293,7 @@ func (m *Manager) AttachArgs(name string) ([]string, error) {
 		return nil, err
 	}
 	if name == "" {
-		return nil, errors.New("usage: tau session attach <name>")
+		return nil, errors.New("usage: tau sessions attach <name>")
 	}
 	full, err := m.resolve(name)
 	if err != nil {
@@ -305,6 +305,43 @@ func (m *Manager) AttachArgs(name string) ([]string, error) {
 // Attach connects the terminal to the session matching name.
 func (m *Manager) Attach(name string) error {
 	args, err := m.AttachArgs(name)
+	if err != nil {
+		return err
+	}
+	return m.D.Run(args...)
+}
+
+// ShellArgs returns the docker arguments for an interactive zsh as the
+// profile's user, in the directory and with the PATH and variables a new
+// session gets.
+func (m *Manager) ShellArgs() ([]string, error) {
+	if err := m.needRunning(); err != nil {
+		return nil, err
+	}
+	flags := []string{"-it"}
+	if m.Env != nil {
+		vars, err := m.Env()
+		if err != nil {
+			return nil, fmt.Errorf("env: %w", err)
+		}
+		for _, kv := range vars {
+			flags = append(flags, "-e", kv)
+		}
+	}
+	if m.Home != "" {
+		flags = append(flags, "-e", "PATH="+Path(m.Home))
+	}
+	if m.Workspace != "" {
+		flags = append(flags, "-w", m.Workspace, "-e", "TAU_WORKSPACE="+m.Workspace)
+	}
+	// umask 002, as in Create: the git proxy must be able to write what the
+	// shell writes.
+	return append(m.execArgs(flags...), "sh", "-c", "umask 002 && exec zsh"), nil
+}
+
+// Shell opens an interactive zsh in the container.
+func (m *Manager) Shell() error {
+	args, err := m.ShellArgs()
 	if err != nil {
 		return err
 	}

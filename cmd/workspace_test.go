@@ -41,7 +41,7 @@ func srcDir(t *testing.T, name string) string {
 func TestWorkspaceAddPrintsOnlyTheHostPathOnStdoutForTheShellWrappers(t *testing.T) {
 	h, _, root := wsHarness(t)
 	d := srcDir(t, "proj")
-	if code := h.app.Run([]string{"workspace", "add", d}); code != 0 {
+	if code := h.app.Run([]string{"workspaces", "add", d}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if want := filepath.Join(root, "proj") + "\n"; h.out.String() != want {
@@ -55,7 +55,7 @@ func TestWorkspaceAddPrintsOnlyTheHostPathOnStdoutForTheShellWrappers(t *testing
 func TestWorkspaceAddLivePrintsTheRealSourceAndWarnsAboutWriteAccess(t *testing.T) {
 	h, _, _ := wsHarness(t)
 	d := srcDir(t, "app")
-	if code := h.app.Run([]string{"workspace", "add", d, "--live"}); code != 0 {
+	if code := h.app.Run([]string{"workspaces", "add", d, "--live"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if h.out.String() != d+"\n" {
@@ -77,7 +77,7 @@ func TestWorkspaceAddDefaultsToTheCurrentDirectoryAndTakesAName(t *testing.T) {
 	old, _ := os.Getwd()
 	os.Chdir(d)
 	defer os.Chdir(old)
-	if code := h.app.Run([]string{"workspace", "add", "--name", "renamed"}); code != 0 {
+	if code := h.app.Run([]string{"workspaces", "add", "--name", "renamed"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if h.out.String() != filepath.Join(root, "renamed")+"\n" {
@@ -88,16 +88,16 @@ func TestWorkspaceAddDefaultsToTheCurrentDirectoryAndTakesAName(t *testing.T) {
 func TestWorkspaceAddReportsRefreshAndNoChange(t *testing.T) {
 	h, _, _ := wsHarness(t)
 	d := srcDir(t, "p")
-	h.app.Run([]string{"workspace", "add", d})
+	h.app.Run([]string{"workspaces", "add", d})
 	h.err.Reset()
-	h.app.Run([]string{"workspace", "add", d})
+	h.app.Run([]string{"workspaces", "add", d})
 	if !strings.Contains(h.err.String(), "refreshed") {
 		t.Errorf("refresh: %q", h.err)
 	}
 	l := srcDir(t, "l")
-	h.app.Run([]string{"workspace", "add", l, "--live"})
+	h.app.Run([]string{"workspaces", "add", l, "--live"})
 	h.err.Reset()
-	h.app.Run([]string{"workspace", "add", l, "--live"})
+	h.app.Run([]string{"workspaces", "add", l, "--live"})
 	if !strings.Contains(h.err.String(), "already") {
 		t.Errorf("unchanged: %q", h.err)
 	}
@@ -105,49 +105,33 @@ func TestWorkspaceAddReportsRefreshAndNoChange(t *testing.T) {
 
 func TestWorkspaceAddFailuresExitOneAndPrintNothingOnStdout(t *testing.T) {
 	h, _, _ := wsHarness(t)
-	if code := h.app.Run([]string{"workspace", "add", filepath.Join(t.TempDir(), "none")}); code != 1 || h.out.Len() != 0 {
+	if code := h.app.Run([]string{"workspaces", "add", filepath.Join(t.TempDir(), "none")}); code != 1 || h.out.Len() != 0 {
 		t.Errorf("exit %d out %q", code, h.out)
 	}
-	if code := h.app.Run([]string{"workspace", "add", srcDir(t, "p"), "--name", "../x"}); code != 1 || h.out.Len() != 0 {
+	if code := h.app.Run([]string{"workspaces", "add", srcDir(t, "p"), "--name", "../x"}); code != 1 || h.out.Len() != 0 {
 		t.Errorf("bad name: exit %d out %q", code, h.out)
 	}
 }
 
-func TestWorkspaceLsPipedIsTabSeparated(t *testing.T) {
+func TestWorkspaceListShowsEachEntrysKindAndPaths(t *testing.T) {
 	h, _, root := wsHarness(t)
 	d := srcDir(t, "app")
-	h.app.Run([]string{"workspace", "add", d, "--live"})
-	h.app.Run([]string{"workspace", "add", srcDir(t, "zed")})
+	h.app.Run([]string{"workspaces", "add", d, "--live"})
+	h.app.Run([]string{"workspaces", "add", srcDir(t, "zed")})
 	h.out.Reset()
-	if code := h.app.Run([]string{"workspace", "list"}); code != 0 {
+	if code := h.app.Run([]string{"workspaces", "list"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	want := "app\tlive\t/workspace/app\t" + d + "\nzed\tlocal\t/workspace/zed\t" + filepath.Join(root, "zed") + "\n"
-	if h.out.String() != want {
-		t.Errorf("got %q\nwant %q", h.out, want)
-	}
-}
-
-func TestWorkspaceLsOnATerminalShowsKindAndWhereTheAgentSeesIt(t *testing.T) {
-	h, _, _ := wsHarness(t)
-	h.app.Run([]string{"workspace", "add", srcDir(t, "app"), "--live"})
-	h.out.Reset()
-	terminal(h)
-	h.app.Run([]string{"workspace", "list"})
-	out := plain(h)
-	for _, want := range []string{"app", "live", "/workspace/app"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("lacks %q:\n%s", want, out)
-		}
-	}
+	assertHasWords(t, rowOf(t, h.out.String(), "app"), "live", "/workspace/app", d)
+	assertHasWords(t, rowOf(t, h.out.String(), "zed"), "copy", "/workspace/zed", filepath.Join(root, "zed"))
 }
 
 func TestWorkspaceRmRemovesACopyAndSaysTheSourceIsUntouched(t *testing.T) {
 	h, _, root := wsHarness(t)
 	d := srcDir(t, "p")
-	h.app.Run([]string{"workspace", "add", d})
+	h.app.Run([]string{"workspaces", "add", d})
 	h.err.Reset()
-	if code := h.app.Run([]string{"workspace", "rm", "p"}); code != 0 {
+	if code := h.app.Run([]string{"workspaces", "rm", "p"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "p")); err == nil {
@@ -161,10 +145,10 @@ func TestWorkspaceRmRemovesACopyAndSaysTheSourceIsUntouched(t *testing.T) {
 func TestWorkspaceRmOfALiveEntryUnmountsOnRestartAndKeepsTheSource(t *testing.T) {
 	h, life, _ := wsHarness(t)
 	d := srcDir(t, "app")
-	h.app.Run([]string{"workspace", "add", d, "--live"})
+	h.app.Run([]string{"workspaces", "add", d, "--live"})
 	life.st.Running = true
 	h.err.Reset()
-	if code := h.app.Run([]string{"workspace", "remove", "app"}); code != 0 {
+	if code := h.app.Run([]string{"workspaces", "remove", "app"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if _, err := os.Stat(d); err != nil {
@@ -177,10 +161,10 @@ func TestWorkspaceRmOfALiveEntryUnmountsOnRestartAndKeepsTheSource(t *testing.T)
 
 func TestWorkspaceRmOfAnUnknownNameFails(t *testing.T) {
 	h, _, _ := wsHarness(t)
-	if code := h.app.Run([]string{"workspace", "rm", "nope"}); code != 1 || !strings.Contains(h.err.String(), "nope") {
+	if code := h.app.Run([]string{"workspaces", "rm", "nope"}); code != 1 || !strings.Contains(h.err.String(), "nope") {
 		t.Errorf("exit %d err %q", code, h.err)
 	}
-	if code := h.app.Run([]string{"workspace", "rm"}); code != 1 {
+	if code := h.app.Run([]string{"workspaces", "rm"}); code != 1 {
 		t.Errorf("no argument: exit %d", code)
 	}
 }
@@ -188,13 +172,13 @@ func TestWorkspaceRmOfAnUnknownNameFails(t *testing.T) {
 func TestWorkspaceCdPrintsTheHostPathAndNothingElse(t *testing.T) {
 	h, _, root := wsHarness(t)
 	d := srcDir(t, "app")
-	h.app.Run([]string{"workspace", "add", d, "--live"})
-	h.app.Run([]string{"workspace", "add", srcDir(t, "p")})
+	h.app.Run([]string{"workspaces", "add", d, "--live"})
+	h.app.Run([]string{"workspaces", "add", srcDir(t, "p")})
 	h.out.Reset()
 	h.err.Reset()
 	for name, want := range map[string]string{"app": d, "p": filepath.Join(root, "p"), "": root} {
 		h.out.Reset()
-		args := []string{"workspace", "cd"}
+		args := []string{"workspaces", "cd"}
 		if name != "" {
 			args = append(args, name)
 		}
@@ -203,7 +187,7 @@ func TestWorkspaceCdPrintsTheHostPathAndNothingElse(t *testing.T) {
 		}
 	}
 	h.out.Reset()
-	if code := h.app.Run([]string{"workspace", "cd", "nope"}); code != 1 || h.out.Len() != 0 {
+	if code := h.app.Run([]string{"workspaces", "cd", "nope"}); code != 1 || h.out.Len() != 0 {
 		t.Errorf("unknown: exit %d out %q", code, h.out)
 	}
 }
@@ -220,7 +204,7 @@ func TestWorkspaceWorksOnTheSelectedProfile(t *testing.T) {
 		return nil
 	}
 	d := srcDir(t, "p")
-	if code := h.app.Run([]string{"workspace", "add", d, "-p", "work"}); code != 0 {
+	if code := h.app.Run([]string{"workspaces", "add", d, "-p", "work"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if h.out.String() != filepath.Join(dir, "workspace", "p")+"\n" {
@@ -233,7 +217,7 @@ func TestWorkspaceWorksOnTheSelectedProfile(t *testing.T) {
 
 func TestALiveAddWarnsThatTheAgentCanEditTheSource(t *testing.T) {
 	h, _, _ := wsHarness(t)
-	h.app.Run([]string{"workspace", "add", srcDir(t, "proj"), "--live"})
+	h.app.Run([]string{"workspaces", "add", srcDir(t, "proj"), "--live"})
 	if !strings.Contains(h.err.String(), "read/write") {
 		t.Errorf("no warning: %q", h.err)
 	}

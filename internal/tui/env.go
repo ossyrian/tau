@@ -9,11 +9,12 @@ import (
 )
 
 type envLoadedMsg struct {
-	vars []envfile.Var
-	err  error
+	profile string
+	vars    []envfile.Var
+	err     error
 }
 
-// envSection edits the profile's environment variables.
+// envSection is a single table of the profile's environment variables.
 type envSection struct {
 	api    API
 	vars   *varEditor
@@ -56,7 +57,7 @@ func (e *envSection) load() tea.Cmd {
 	api := e.api
 	return func() tea.Msg {
 		v, err := api.EnvVars()
-		return envLoadedMsg{v, err}
+		return envLoadedMsg{api.Status().Profile, v, err}
 	}
 }
 
@@ -64,7 +65,7 @@ func (e *envSection) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case envLoadedMsg:
 		e.err, e.loaded = msg.err, true
-		e.vars.Set(msg.vars)
+		e.vars.Set(msg.profile, msg.vars)
 	case reloadMsg:
 		return e.load()
 	case tea.KeyPressMsg:
@@ -73,12 +74,9 @@ func (e *envSection) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-func (e *envSection) View(cols, rows int) []string {
-	if e.err != nil {
-		return append([]string{""}, wrap(errStyle, e.err.Error(), cols-1)...)
+func (e *envSection) View(w, h int) string {
+	if msg := stateMessage(e.err, e.loaded); msg != "" {
+		return messagePane("env", w, h, msg)
 	}
-	if !e.loaded {
-		return []string{"", dimStyle.Render("loading…")}
-	}
-	return e.vars.View(cols, rows)
+	return varsPane("env", w, h, e.vars)
 }

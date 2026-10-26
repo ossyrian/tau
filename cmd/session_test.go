@@ -47,10 +47,10 @@ func TestSessionNewVariants(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"session", "new"}, "rand0001"},
-		{[]string{"session", "new", "foo"}, "foo"},
-		{[]string{"session", "new", "--name", "foo"}, "foo"},
-		{[]string{"session", "new", "--name=foo"}, "foo"},
+		{[]string{"sessions", "new"}, "rand0001"},
+		{[]string{"sessions", "new", "foo"}, "foo"},
+		{[]string{"sessions", "new", "--name", "foo"}, "foo"},
+		{[]string{"sessions", "new", "--name=foo"}, "foo"},
 	}
 	for _, c := range cases {
 		h := newHarness(t, "", "")
@@ -67,12 +67,12 @@ func TestSessionNewVariants(t *testing.T) {
 
 func TestSessionNewRejectsBadUsage(t *testing.T) {
 	for _, args := range [][]string{
-		{"session", "new", "--bogus"},
-		{"session", "new", "a", "b"},
-		{"session", "new", "--name"},
-		{"session", "new", "--name", "a", "b"},
-		{"session", "new", "--name", "a", "--name", "b"},
-		{"session", "new", "foo", "--name", "bar"},
+		{"sessions", "new", "--bogus"},
+		{"sessions", "new", "a", "b"},
+		{"sessions", "new", "--name"},
+		{"sessions", "new", "--name", "a", "b"},
+		{"sessions", "new", "--name", "a", "--name", "b"},
+		{"sessions", "new", "foo", "--name", "bar"},
 	} {
 		h := newHarness(t, "", "")
 		d := withSessions(h)
@@ -89,13 +89,16 @@ func TestSessionList(t *testing.T) {
 	h := newHarness(t, "", "")
 	d := withSessions(h)
 	d.out["list-sessions"] = "main|1700000000|1700000000\n"
-	if code := h.app.Run([]string{"session", "list"}); code != 0 {
+	if code := h.app.Run([]string{"sessions", "list"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if h.out.String() != "main\tsession\t2023-11-14T22:13:20Z\t2023-11-14T22:13:20Z\tdefault\n" {
-		t.Errorf("out %q", h.out)
+	h.app.Now = func() time.Time { return time.Unix(1700000000, 0).Add(2 * time.Hour) }
+	h.out.Reset()
+	if code := h.app.Run([]string{"sessions", "list"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if code := h.app.Run([]string{"session", "list", "extra"}); code != 1 {
+	assertHasWords(t, rowOf(t, h.out.String(), "main"), "session", "default", "2", "hours", "ago")
+	if code := h.app.Run([]string{"sessions", "list", "extra"}); code != 1 {
 		t.Errorf("extra arg: %d", code)
 	}
 }
@@ -105,10 +108,10 @@ func TestSessionKillAndAttachTakeExactlyOneName(t *testing.T) {
 		h := newHarness(t, "", "")
 		d := withSessions(h)
 		d.out["list-sessions"] = "main|1700000000|1700000000\n"
-		if code := h.app.Run([]string{"session", sub, "ma"}); code != 0 {
+		if code := h.app.Run([]string{"sessions", sub, "ma"}); code != 0 {
 			t.Errorf("%s: exit %d: %s", sub, code, h.err)
 		}
-		for _, bad := range [][]string{{"session", sub}, {"session", sub, "a", "b"}} {
+		for _, bad := range [][]string{{"sessions", sub}, {"sessions", sub, "a", "b"}} {
 			if code := h.app.Run(bad); code != 1 {
 				t.Errorf("%v: exit %d", bad, code)
 			}
@@ -120,14 +123,35 @@ func TestSessionErrorsExitOne(t *testing.T) {
 	h := newHarness(t, "", "")
 	d := withSessions(h)
 	d.out["list-sessions"] = "main|1700000000|1700000000\n"
-	if code := h.app.Run([]string{"session", "kill", "nope"}); code != 1 || !strings.Contains(h.err.String(), "no session matching") {
+	if code := h.app.Run([]string{"sessions", "kill", "nope"}); code != 1 || !strings.Contains(h.err.String(), "no session matching") {
 		t.Errorf("exit %d err %q", code, h.err)
 	}
 }
 
 func TestSessionWithoutManagerFailsCleanly(t *testing.T) {
 	h := newHarness(t, "", "")
-	if code := h.app.Run([]string{"session", "list"}); code != 1 {
+	if code := h.app.Run([]string{"sessions", "list"}); code != 1 {
+		t.Errorf("exit %d", code)
+	}
+}
+
+func TestShellOpensZshInTheContainer(t *testing.T) {
+	h := newHarness(t, "", "")
+	d := withSessions(h)
+	if code := h.app.Run([]string{"shell"}); code != 0 {
+		t.Fatalf("exit %d: %s", code, h.err)
+	}
+	if len(d.run) != 1 || d.run[0][len(d.run[0])-1] != "umask 002 && exec zsh" {
+		t.Errorf("ran %v", d.run)
+	}
+	if code := h.app.Run([]string{"shell", "extra"}); code != 1 {
+		t.Errorf("extra arg: exit %d", code)
+	}
+}
+
+func TestShellWithoutManagerFailsCleanly(t *testing.T) {
+	h := newHarness(t, "", "")
+	if code := h.app.Run([]string{"shell"}); code != 1 {
 		t.Errorf("exit %d", code)
 	}
 }

@@ -1,7 +1,7 @@
 /**
  * workspace-tools — read-only visibility into the tau workspaces.
  *
- * A workspace at /workspace/<name> (added host-side with `tau workspace add`)
+ * A workspace at /workspace/<name> (added host-side with `tau workspaces add`)
  * is either a live bind into the user's real project or a copy (snapshot) in
  * tau's staging dir. This extension only READS them: it never creates, removes,
  * or edits a workspace. Adding/removing is the user's job via the tau CLI, by
@@ -80,12 +80,12 @@ export default function (pi: ExtensionAPI): void {
 		name: "workspace_list",
 		label: "Workspace: list",
 		description:
-			"List the project workspaces under /workspace/<name> (read-only), noting whether each is a live bind into the user's project or a copy (snapshot). Added host-side with `tau workspace add`; \"go to <name>\" means work under /workspace/<name>.",
+			"List the project workspaces under /workspace/<name> (read-only), noting whether each is a live bind into the user's project or a copy (snapshot). Added host-side with `tau workspaces add`; \"go to <name>\" means work under /workspace/<name>.",
 		parameters: Type.Object({}),
 		async execute() {
 			const ws = listWorkspaces();
 			if (ws.length === 0)
-				return ok("No workspaces under /workspace. Ask the user to run `tau workspace add`.");
+				return ok("No workspaces under /workspace. Ask the user to run `tau workspaces add`.");
 			const rows = ws.map((n) => {
 				let count = 0;
 				try {

@@ -31,7 +31,6 @@ func newApp() *App {
 		Env:         os.Getenv,
 		Interactive: term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())),
 		Pretty:      term.IsTerminal(int(os.Stdout.Fd())),
-		Width:       terminalWidth(),
 		NoColor:     os.Getenv("NO_COLOR") != "",
 		Docker: func(args []string, dockerfile string) error {
 			return dockercli.CLI{}.WithStdin(args, dockerfile, os.Stdout)

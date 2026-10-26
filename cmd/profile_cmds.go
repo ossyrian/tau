@@ -7,12 +7,11 @@ import (
 	"github.com/ossyrian/tau/internal/config"
 	"github.com/ossyrian/tau/internal/profile"
 	"github.com/ossyrian/tau/internal/render"
-	"github.com/ossyrian/tau/internal/theme"
 	"github.com/spf13/cobra"
 )
 
-func (a *App) profileCmd() *cobra.Command {
-	return parent("profile", "manage profiles",
+func (a *App) profilesCmd() *cobra.Command {
+	return parent("profiles", "manage profiles",
 		&cobra.Command{Use: "list", Short: "list profiles", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 			return a.profileList()
 		}},
@@ -46,7 +45,7 @@ func (a *App) profileList() error {
 	if err != nil {
 		return err
 	}
-	items := make([]render.Item, len(profiles))
+	rows := make([][]string, len(profiles))
 	for i, p := range profiles {
 		mode := "owner"
 		if p.Name != profile.Default {
@@ -56,15 +55,8 @@ func (a *App) profileList() error {
 			}
 			mode = w.Mode
 		}
-		items[i] = render.Item{
-			Title:  p.Name,
-			Fields: []string{p.Name, p.User, mode},
-			Details: []render.Detail{
-				{Label: "User", Value: p.User, Style: theme.Dim},
-				{Label: "Workspace", Value: mode, Style: theme.Dim},
-			},
-		}
+		rows[i] = []string{p.Name, p.User, mode}
 	}
-	a.out().List("Profiles", items, "no profiles")
+	a.out().Table([]render.Column{{Title: "NAME"}, {Title: "USER"}, {Title: "WORKSPACE"}}, rows)
 	return nil
 }

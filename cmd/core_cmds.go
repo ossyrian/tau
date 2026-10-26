@@ -50,15 +50,17 @@ func (a *App) status() error {
 	case build.ImageStale, build.ImageMissing:
 		imageStyle = theme.Warn
 	}
-	profile := st.Profile
 	drift := len(st.Drift.RuntimeOnly) + len(st.Drift.Changed)
-	a.out().Pairs([]render.Pair{
-		{Key: "container", Value: state, Text: strings.ReplaceAll(state, "-", " "), Style: stateStyle},
-		{Key: "image", Value: image, Style: imageStyle},
-		{Key: "packages", Value: fmt.Sprint(drift), Text: plural(drift, "need a decision", "in sync"), Style: countStyle(drift)},
-		{Key: "skills", Value: fmt.Sprint(st.SkillsPending), Text: plural(st.SkillsPending, "pending restart", "in sync"), Style: countStyle(st.SkillsPending)},
-		{Key: "profile", Label: "profile", Value: profile, Style: theme.Dim},
-	}, "")
+	pkgs, pkgStyle := plural(drift, "need a decision", "in sync"), countStyle(drift)
+	sk, skStyle := plural(st.SkillsPending, "pending restart", "in sync"), countStyle(st.SkillsPending)
+	fixed := func(s lipgloss.Style) func(string) lipgloss.Style { return func(string) lipgloss.Style { return s } }
+	a.out().Table([]render.Column{
+		{Title: "PROFILE"},
+		{Title: "CONTAINER", Style: fixed(stateStyle)},
+		{Title: "IMAGE", Style: fixed(imageStyle)},
+		{Title: "PACKAGES", Style: fixed(pkgStyle)},
+		{Title: "SKILLS", Style: fixed(skStyle)},
+	}, [][]string{{st.Profile, strings.ReplaceAll(state, "-", " "), image, pkgs, sk}})
 
 	if len(st.Problems) > 0 {
 		return errors.New(strings.Join(st.Problems, "\n"))
@@ -127,17 +129,15 @@ func (a *App) skillsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items := make([]render.Item, len(list))
+			rows := make([][]string, len(list))
 			for k, sk := range list {
-				items[k] = render.Item{
-					Title: sk.Name, Note: sk.Path,
-					Fields: []string{sk.Name, string(sk.State), sk.Path},
-					Details: []render.Detail{
-						{Label: "State", Value: string(sk.State), Style: skillStateStyle(sk.State)},
-					},
-				}
+				rows[k] = []string{sk.Name, string(sk.State), sk.Path}
 			}
-			a.out().List("Skills", items, "no skills found")
+			a.profileTable([]render.Column{
+				{Title: "NAME"},
+				{Title: "STATE", Style: func(c string) lipgloss.Style { return skillStateStyle(skills.State(c)) }},
+				{Title: "PATH"},
+			}, rows)
 			return nil
 		}},
 		toggle("activate NAME|PATH", "activate a skill", "activated", true),
@@ -173,22 +173,24 @@ func (a *App) skillPathsCmd(needCore func() error) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items := make([]render.Item, len(paths))
+			rows := make([][]string, len(paths))
 			for k, p := range paths {
-				state, style := "found", theme.OK
+				state := "found"
 				if !p.Found {
-					state, style = "missing", theme.Err
+					state = "missing"
 				}
-				items[k] = render.Item{
-					Title:  p.Path,
-					Fields: []string{p.Path, state, fmt.Sprint(p.Skills)},
-					Details: []render.Detail{
-						{Label: "State", Value: state, Style: style},
-						{Label: "Skills", Value: fmt.Sprint(p.Skills), Style: theme.Dim},
-					},
-				}
+				rows[k] = []string{p.Path, state, fmt.Sprint(p.Skills)}
 			}
-			a.out().List("Skill paths", items, "no skill paths")
+			a.profileTable([]render.Column{
+				{Title: "PATH"},
+				{Title: "STATE", Style: func(c string) lipgloss.Style {
+					if c == "missing" {
+						return theme.Err
+					}
+					return theme.OK
+				}},
+				{Title: "SKILLS"},
+			}, rows)
 			return nil
 		}},
 		change("add", "add a skill directory", "added", true),
@@ -212,15 +214,15 @@ func (a *App) envCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		pairs := make([]render.Pair, len(vars))
+		rows := make([][]string, len(vars))
 		for k, v := range vars {
 			val := envfile.Mask(v.Value)
 			if show {
 				val = v.Value
 			}
-			pairs[k] = render.Pair{Key: v.Key, Value: val}
+			rows[k] = []string{v.Key, val}
 		}
-		a.out().Pairs(pairs, "no variables")
+		a.profileTable([]render.Column{{Title: "KEY"}, {Title: "VALUE"}}, rows)
 		return nil
 	}}
 	list.Flags().BoolVar(&show, "show", false, "print values in full")
@@ -243,7 +245,7 @@ func (a *App) envCmd() *cobra.Command {
 		}
 		if envfile.LooksSecret(key) {
 			fmt.Fprintf(a.Stderr, "tau: %s looks like a credential. The agent can read every variable here;\n"+
-				"     keep credentials out of its reach with: tau proxy env set PROXY %s\n", key, key)
+				"     keep credentials out of its reach with: tau proxies env set PROXY %s\n", key, key)
 		}
 		a.out().Done("set", key, "new sessions get it")
 		return nil

@@ -6,11 +6,14 @@ import (
 	"time"
 
 	bkey "charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 	"github.com/ossyrian/tau/internal/build"
 	"github.com/ossyrian/tau/internal/core"
+	"github.com/ossyrian/tau/internal/theme"
 )
 
+// home is a single pane: what needs attention, one row per fact.
 type home struct {
 	api    API
 	status core.Status
@@ -22,10 +25,7 @@ func (h *home) Name() string    { return "home" }
 func (h *home) Enter() tea.Cmd  { return nil }
 func (h *home) Capturing() bool { return false }
 func (h *home) Keys() []bkey.Binding {
-	return []bkey.Binding{
-		binding("s", "s", "start"), binding("x", "x", "stop"),
-		binding("r", "r", "restart"),
-	}
+	return []bkey.Binding{binding("s", "s", "start"), binding("x", "x", "stop"), binding("r", "r", "restart")}
 }
 
 func (h *home) Update(msg tea.Msg) tea.Cmd {
@@ -60,62 +60,55 @@ func uptime(d time.Duration) string {
 	return fmt.Sprintf("%dm", int(d.Minutes()))
 }
 
-// count reads "N noun" or "N nouns".
-func count(n int, noun string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 %s", noun)
-	}
-	return fmt.Sprintf("%d %ss", n, noun)
-}
-
-func fact(label, value string) string {
-	return dimStyle.Render(fmt.Sprintf("%-12s", label)) + value
-}
-
-func (h *home) View(cols, rows int) []string {
+// facts are the rows of the pane: what, then how it stands.
+func (h *home) facts() [][2]string {
 	s := h.status
-	var container string
+	container := "not running"
 	switch {
 	case s.Container.Running:
-		container = okStyle.Render("running")
+		container = "running"
 		if !s.Container.Started.IsZero() {
-			container += dimStyle.Render("  up " + uptime(time.Since(s.Container.Started)))
+			container += ", up " + uptime(time.Since(s.Container.Started))
 		}
 	case s.Container.Exists:
-		container = warnStyle.Render("stopped")
-	default:
-		container = dimStyle.Render("not running")
+		container = "stopped"
 	}
-	image := map[build.ImageStatus]string{
-		build.ImageCurrent: okStyle.Render("current"),
-		build.ImageStale:   warnStyle.Render("stale") + dimStyle.Render("  rebuild in packages"),
-		build.ImageMissing: warnStyle.Render("missing") + dimStyle.Render("  build it in packages"),
-		build.ImageUnknown: dimStyle.Render("unknown"),
-	}[s.Image]
-	profile := s.Profile
-
 	drift := len(s.Drift.RuntimeOnly) + len(s.Drift.Changed)
-	lines := []string{
-		titleStyle.Render("Harness"), "",
-		fact("container", container),
-		fact("image", image),
-		fact("profile", profile), "",
-		titleStyle.Render("Needs attention"), "",
-		fact("packages", pending(drift, "package", "need a decision")),
-		fact("skills", pending(s.SkillsPending, "skill", "pending restart")),
+	rows := [][2]string{
+		{"container", container},
+		{"image", s.Image.String()},
+		{"packages", pendingText(drift, "need a decision")},
+		{"skills", pendingText(s.SkillsPending, "pending restart")},
 	}
-	if len(s.Problems) > 0 {
-		lines = append(lines, "", errStyle.Render("Problems"), "")
-		for _, p := range s.Problems {
-			lines = append(lines, errStyle.Render(strings.TrimSpace(p)))
-		}
+	if s.Image == build.ImageStale || s.Image == build.ImageMissing {
+		rows[1][1] += ", build it in packages"
 	}
-	return lines
+	for _, p := range s.Problems {
+		rows = append(rows, [2]string{"problem", strings.TrimSpace(p)})
+	}
+	return rows
 }
 
-func pending(n int, noun, what string) string {
+func pendingText(n int, what string) string {
 	if n == 0 {
-		return okStyle.Render("in sync")
+		return "in sync"
 	}
-	return warnStyle.Render(count(n, noun) + " " + what)
+	return fmt.Sprintf("%d %s", n, what)
+}
+
+func (h *home) View(w, ht int) string {
+	iw, ih := inner(w, ht)
+	facts := h.facts()
+	rows := make([]table.Row, len(facts))
+	for i, f := range facts {
+		rows[i] = table.Row{h.status.Profile, f[0], f[1]}
+	}
+	t := table.New(
+		table.WithColumns([]table.Column{
+			{Title: "PROFILE", Width: 10}, {Title: "WHAT", Width: 12}, {Title: "STATE", Width: max(iw-22-2*3, 8)},
+		}),
+		table.WithRows(rows), table.WithWidth(iw), table.WithHeight(ih),
+		table.WithStyles(table.Styles{Header: theme.Dim.Padding(0, 1), Cell: theme.Dim.Padding(0, 1).UnsetFaint(), Selected: theme.Selected}),
+	)
+	return pane("home", w, ht, true, t.View())
 }

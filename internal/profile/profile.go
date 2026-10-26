@@ -99,7 +99,7 @@ func (s Set) Select(name string) (Profile, error) {
 		return p, nil
 	}
 	if st, err := os.Stat(p.Dir); err != nil || !st.IsDir() {
-		return Profile{}, fmt.Errorf("no profile %q (tau profile new %s creates it)", name, name)
+		return Profile{}, fmt.Errorf("no profile %q (tau profiles new %s creates it)", name, name)
 	}
 	return p, nil
 }

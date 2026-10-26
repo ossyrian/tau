@@ -35,9 +35,9 @@ make                  # builds ./tau
 cp -r example/. ~/.tau/   # a starting config; fill in ~/.tau/secrets/*.env
 tau build             # build the image from ~/.tau/config.yaml
 tau start             # create the container
-tau session new       # start Pi in tmux; detach with Ctrl-b d
-tau session list
-tau session attach NAME
+tau sessions new      # start Pi in tmux; detach with Ctrl-b d
+tau sessions list
+tau sessions attach NAME
 tau -i                # terminal UI
 ```
 
@@ -52,8 +52,8 @@ Run `tau -h` for the other commands:
 | `proxy` | list, allow, disallow, refresh and reload proxies; set their variables |
 | `env` | set the profile's environment variables |
 
-`tau workspace cd NAME` and `tau workspace add` print the host path, so
-`cd "$(tau workspace cd NAME)"` changes your shell's directory.
+`tau workspaces cd NAME` and `tau workspaces add` print the host path, so
+`cd "$(tau workspaces cd NAME)"` changes your shell's directory.
 
 ## Files
 
@@ -93,12 +93,12 @@ proxies:
   active: [aws-dev-readonly]
 ```
 
-- `env_from` runs on your machine at `tau start` and `tau proxy refresh`. Stored
-  variables (`tau proxy env set PROXY KEY VALUE`) are kept in `~/.tau/secrets/`.
+- `env_from` runs on your machine at `tau start` and `tau proxies refresh`. Stored
+  variables (`tau proxies env set PROXY KEY VALUE`) are kept in `~/.tau/secrets/`.
 - A profile can have one active proxy per `agent_command`.
 - Each proxy gets its own user, server and socket. The kernel keeps one proxy's
   memory from another's.
-- Adding or changing a proxy needs `tau proxy reload`. Changing `packages` or
+- Adding or changing a proxy needs `tau proxies reload`. Changing `packages` or
   `binary` needs `tau build` and `tau restart`.
 
 ## Git
@@ -112,6 +112,6 @@ only. Branch protection is the real limit.
 
 ## Not ported yet
 
-These still exist only in the old bash script (`git show HEAD:tau`): `shell`,
-`gitconfig`, `paste`, `annotate`, `live` and `migrate`. `AGENTS.md` has the detailed
+These still exist only in the old bash script (`git show HEAD:tau`): `gitconfig`,
+`paste`, `annotate`, `live` and `migrate`. `AGENTS.md` has the detailed
 reference.

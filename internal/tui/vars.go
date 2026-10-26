@@ -5,28 +5,13 @@ import (
 	"strings"
 
 	bkey "charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"github.com/ossyrian/tau/internal/envfile"
+	"github.com/ossyrian/tau/internal/theme"
 )
 
 var varNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-
-// varRow is one KEY=value row. The value is masked until reveal is set.
-type varRow struct {
-	v      envfile.Var
-	reveal bool
-}
-
-func (r varRow) FilterValue() string { return r.v.Key }
-func (r varRow) Title() string       { return r.v.Key }
-func (r varRow) Description() string {
-	if r.reveal {
-		return r.v.Value
-	}
-	return envfile.Mask(r.v.Value)
-}
 
 type varStep int
 
@@ -36,88 +21,95 @@ const (
 	varValue
 )
 
-// varEditor lists variables and edits them: reveal, new, edit, delete. The
-// env section and each proxy's page both use it; they differ in what the
-// owner does with a change.
+// varEditor lists KEY=value pairs in a table and edits them. The env section
+// and each proxy's variables use it; they differ in what the owner does with a
+// change. Values are masked until the user reveals them.
 type varEditor struct {
-	list    list.Model
+	profile string
+	pick    *picker
 	vars    []envfile.Var
 	reveal  bool
+
 	step    varStep
 	key     string // the name being set
-	editing bool   // true when the name was chosen from the list
+	editing bool   // true when the name was chosen from the table
 	name    textinput.Model
 	value   textinput.Model
 	msg     string // validation message while naming
 
-	// Set receives a finished edit, Delete a confirmed removal. Each returns
-	// the command that does it. Where names what the variables belong to.
+	// set receives a finished edit, remove a confirmed removal. Each returns
+	// the command that does it.
 	set    func(key, value string) tea.Cmd
 	remove func(key string) tea.Cmd
-	where  string
 }
 
 func newVarEditor() *varEditor {
 	return &varEditor{
-		list:  newList(nil, 30, 10),
+		pick:  newPicker("PROFILE", "KEY", "VALUE"),
 		name:  newInput("VARIABLE_NAME", 40),
 		value: newSecretInput("value", 50),
 	}
 }
 
-func (e *varEditor) Capturing() bool { return e.step != varBrowse }
+func (e *varEditor) Capturing() bool { return e.step != varBrowse || e.pick.Capturing() }
 
 func (e *varEditor) Keys() []bkey.Binding {
 	if e.step != varBrowse {
 		return []bkey.Binding{binding("enter", "enter", "next"), binding("esc", "esc", "cancel")}
 	}
-	return []bkey.Binding{
-		binding("n", "n", "new"), binding("e", "e", "edit"), binding("d", "d", "delete"),
-		binding("v", "v", "reveal"),
+	keys := e.pick.Keys()
+	if e.pick.Capturing() {
+		return keys
 	}
+	return append(keys, binding("n", "n", "new"), binding("e", "e", "edit"), binding("d", "d", "delete"), binding("v", "v", "reveal"))
 }
 
 // Hide masks the values again. Owners call it when the screen opens or closes.
-func (e *varEditor) Hide() {
-	e.reveal = false
-	e.rebuild()
+func (e *varEditor) Hide() { e.reveal = false; e.refill() }
+
+// Set replaces the variables, keeping the cursor on the same key.
+func (e *varEditor) Set(profile string, vars []envfile.Var) {
+	e.profile, e.vars = profile, vars
+	e.refill()
 }
 
-// Set replaces the variables, keeping the selection on the same key.
-func (e *varEditor) Set(vars []envfile.Var) {
-	keep := ""
-	if v, ok := e.selected(); ok {
-		keep = v.Key
-	}
-	e.vars = vars
-	e.rebuild()
-	for i, v := range vars {
-		if v.Key == keep {
-			e.list.Select(i)
-		}
-	}
-}
-
-func (e *varEditor) rebuild() {
-	items := make([]list.Item, len(e.vars))
+func (e *varEditor) refill() {
+	rows := make([]pickerRow, len(e.vars))
 	for i, v := range e.vars {
-		items[i] = varRow{v, e.reveal}
+		val := envfile.Mask(v.Value)
+		if e.reveal {
+			val = v.Value
+		}
+		// Search covers every column, and matches the real value even while
+		// it is masked on screen.
+		rows[i] = pickerRow{Key: v.Key, Cells: []string{e.profile, v.Key, val}, Search: e.profile + " " + v.Key + " " + v.Value}
 	}
-	e.list.SetItems(items)
+	e.pick.SetRows(rows)
 }
 
 func (e *varEditor) selected() (envfile.Var, bool) {
-	r, ok := e.list.SelectedItem().(varRow)
-	return r.v, ok
+	r, ok := e.pick.Selected()
+	if !ok {
+		return envfile.Var{}, false
+	}
+	for _, v := range e.vars {
+		if v.Key == r.Key {
+			return v, true
+		}
+	}
+	return envfile.Var{}, false
 }
 
-// Update handles a key. It reports whether it used the key.
+// Update handles a key.
 func (e *varEditor) Update(msg tea.KeyPressMsg) tea.Cmd {
 	switch e.step {
 	case varName:
 		return e.typingName(msg)
 	case varValue:
 		return e.typingValue(msg)
+	}
+	if e.pick.Capturing() {
+		return e.pick.Update(msg)
 	}
 	switch msg.String() {
 	case "n":
@@ -130,22 +122,18 @@ func (e *varEditor) Update(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		e.step, e.editing, e.key = varValue, true, v.Key
-		return e.value.Focus() // the field is empty: nothing prefills a secret
-
+		return e.value.Focus() // the field starts empty: nothing prefills a secret
 	case "d":
-		v, ok := e.selected()
-		if !ok {
-			return nil
+		if v, ok := e.selected(); ok {
+			return e.remove(v.Key)
 		}
-		return e.remove(v.Key)
+		return nil
 	case "v":
 		e.reveal = !e.reveal
-		e.rebuild()
+		e.refill()
 		return nil
 	}
-	var cmd tea.Cmd
-	e.list, cmd = e.list.Update(msg)
-	return cmd
+	return e.pick.Update(msg)
 }
 
 func (e *varEditor) cancel() {
@@ -196,26 +184,21 @@ func (e *varEditor) typingValue(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-// View draws the open input, if any, above the list.
-func (e *varEditor) View(cols, rows int) []string {
-	var out []string
+// prompt is the input pane shown above the table while a variable is edited.
+func (e *varEditor) prompt() (title, body string) {
 	switch e.step {
 	case varName:
-		out = append(out, titleStyle.Render("New variable"), "", dimStyle.Render("name"), e.name.View())
+		body = theme.Dim.Render("name") + "\n" + e.name.View()
 		if e.msg != "" {
-			out = append(out, errStyle.Render(e.msg))
+			body += "\n" + theme.Err.Render(e.msg)
 		}
-		out = append(out, "")
+		return "new variable", body
 	case varValue:
-		verb := "New variable"
+		title = "new variable " + e.key
 		if e.editing {
-			verb = "Edit"
+			title = "edit " + e.key
 		}
-		out = append(out, titleStyle.Render(verb+" "+e.key), "", dimStyle.Render("value (hidden)"), e.value.View(), "")
+		return title, theme.Dim.Render("value (hidden)") + "\n" + e.value.View()
 	}
-	if len(e.vars) == 0 {
-		return append(out, "", dimStyle.Render("no variables — press n to add one"))
-	}
-	e.list.SetSize(cols, max(rows-len(out), 2))
-	return append(out, strings.Split(e.list.View(), "\n")...)
+	return "", ""
 }

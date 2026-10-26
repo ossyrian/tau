@@ -14,9 +14,9 @@ Ephemeral storage blocks accidental production writes, and keeping credentials o
 ## Profiles
 
 ```bash
-tau profile list                     # list profiles (the default is always first)
-tau profile new work                 # create ~/.tau/profiles/work/{config.yaml,pi/}
-tau profile workspaces work shared   # share the default's workspace, or: isolated
+tau profiles list                     # list profiles (the default is always first)
+tau profiles new work                 # create ~/.tau/profiles/work/{config.yaml,pi/}
+tau profiles workspaces work shared   # share the default's workspace, or: isolated
 tau -p work status                   # act as a profile (or TAU_PROFILE=work)
 ```
 
@@ -41,10 +41,10 @@ workspaces:
 ```
 
 ```bash
-tau workspace add [DIR] [--name NAME] [--live]   # DIR defaults to the current directory
-tau workspace list
-tau workspace rm NAME
-tau workspace cd [NAME]       # prints the directory on this machine: cd "$(tau workspace cd NAME)"
+tau workspaces add [DIR] [--name NAME] [--live]   # DIR defaults to the current directory
+tau workspaces list
+tau workspaces rm NAME
+tau workspaces cd [NAME]       # prints the directory on this machine: cd "$(tau workspaces cd NAME)"
 ```
 
 Each entry is one of two kinds:
@@ -57,7 +57,7 @@ Each entry is one of two kinds:
 Which workspace a profile gets:
 
 - **`isolated`** (the default for a named profile): its own `workspace/` under its profile directory, mounted in its own mode-700 home. No other profile can read it.
-- **`shared`**: the default profile's workspace. Every shared profile and the default profile see the same files. `tau profile workspaces NAME shared|isolated` sets it; it needs `tau build` and `tau restart`.
+- **`shared`**: the default profile's workspace. Every shared profile and the default profile see the same files. `tau profiles workspaces NAME shared|isolated` sets it; it needs `tau build` and `tau restart`.
 
 Each profile has its own `workspaces.live` list. A proxy with `runs_in: agent_directory` runs only from inside the shared workspace, so it runs any hook planted in a live directory mounted there.
 
@@ -85,7 +85,7 @@ proxies:
         curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/a.zip
         unzip -q /tmp/a.zip -d /tmp && /tmp/aws/install -i "$PREFIX" -b "$PREFIX/bin"
   defs:
-    aws-prod:                          # a label for `tau proxy allow`, `env`, `refresh`; the agent never sees it
+    aws-prod:                          # a label for `tau proxies allow`, `env`, `refresh`; the agent never sees it
       package: aws-cli
       binary: bin/aws
       agent_command: aws
@@ -109,20 +109,20 @@ proxies:
   active: [aws-prod]                   # only prod's credentials
 ```
 
-A profile cannot activate two proxies with the same `agent_command`: `tau proxy allow` refuses the second.
+A profile cannot activate two proxies with the same `agent_command`: `tau proxies allow` refuses the second.
 
 ```bash
-tau proxy list                            # definitions, what the agent types, and whether this profile uses each
-tau proxy allow gh / tau proxy disallow gh   # per profile
-tau proxy env set aws-prod AWS_REGION eu-west-1
-tau proxy env list aws-prod [--show]        # values are masked unless --show
-tau proxy refresh [PROXY...]              # mint fresh credentials; all in use if none named
-tau proxy reload                          # push stored variables and choices; mints nothing
+tau proxies list                            # definitions, what the agent types, and whether this profile uses each
+tau proxies allow gh / tau proxies disallow gh   # per profile
+tau proxies env set aws-prod AWS_REGION eu-west-1
+tau proxies env list aws-prod [--show]        # values are masked unless --show
+tau proxies refresh [PROXY...]              # mint fresh credentials; all in use if none named
+tau proxies reload                          # push stored variables and choices; mints nothing
 ```
 
-**Credentials and refresh.** `env_from` runs on the host at `tau start` and on `tau proxy refresh`. It never runs on `env set`, `allow`, `disallow` or `reload`: those keep the credentials a server already holds. `tau proxy refresh aws-prod` runs only `aws-prod`'s `env_from` and reloads only its server, so only the profiles that use it see new credentials. If `env_from` fails, every server keeps its old credentials and the error names the proxy. Nothing refreshes on a timer: re-run `refresh` when a credential expires.
+**Credentials and refresh.** `env_from` runs on the host at `tau start` and on `tau proxies refresh`. It never runs on `env set`, `allow`, `disallow` or `reload`: those keep the credentials a server already holds. `tau proxies refresh aws-prod` runs only `aws-prod`'s `env_from` and reloads only its server, so only the profiles that use it see new credentials. If `env_from` fails, every server keeps its old credentials and the error names the proxy. Nothing refreshes on a timer: re-run `refresh` when a credential expires.
 
-**What needs a rebuild.** Only `proxies.packages` and a proxy's `binary` (they install into the image). Adding, removing or changing a proxy, its secrets, `deny`, `env_from` or `allow` needs no rebuild and no restart; `tau proxy reload` applies it.
+**What needs a rebuild.** Only `proxies.packages` and a proxy's `binary` (they install into the image). Adding, removing or changing a proxy, its secrets, `deny`, `env_from` or `allow` needs no rebuild and no restart; `tau proxies reload` applies it.
 
 **Isolation.** Each used proxy has its own OS user (`tx-<name>`, uid 30000-49999), its own server process and its own socket directory. A profile reaches a server only if the kernel says its uid is allowed (`SO_PEERCRED`). Secrets go to a server on stdin through a private pipe, live in that server's memory, and are never written to the container's disk or an argument list. Another uid cannot read a process's `/proc/<pid>/environ` or memory, and `--security-opt no-new-privileges` stops a setuid binary from changing that. So a profile that cannot call `aws-prod` cannot read its credentials even by exploiting another proxied CLI.
 
@@ -303,8 +303,8 @@ tau start                         # Retry
 ### A workspace isn't visible in the container
 
 ```bash
-tau workspace list                              # List configured
-tau workspace add /path/to/project --name myp   # Add if missing
+tau workspaces list                              # List configured
+tau workspaces add /path/to/project --name myp   # Add if missing
 tau shell; ls /workspace/                       # Verify mounted
 ```
 
@@ -322,7 +322,7 @@ The container only has access to:
 To work with a project, add it as a workspace:
 
 ```bash
-tau workspace add ~/path/to/my/project --name myproject
+tau workspaces add ~/path/to/my/project --name myproject
 cd /workspace/myproject  # Then work there
 ```
 
@@ -374,19 +374,19 @@ The image holds only what Tau needs: zsh, tmux, curl, socat, Node, Pi, treehouse
 tau start
 
 # Start a Pi session inside
-tau session new
+tau sessions new
 
 # Detach from a session
 # Ctrl-b d
 
 # List running sessions
-tau session list
+tau sessions list
 
 # Reattach to a session
-tau session attach <name>
+tau sessions attach <name>
 
 # Add a project
-tau workspace add ~/dev/myproject --name myproject
+tau workspaces add ~/dev/myproject --name myproject
 
 # Open a shell in the container
 tau shell

@@ -265,11 +265,11 @@ func TestHandleReportsFinishWithoutQuitting(t *testing.T) {
 func TestItemsCountsWhatIsLeft(t *testing.T) {
 	_, c := setup(t, baseYAML, runtimeYAML)
 	m := NewResolve(c)
-	if m.Pending() != 3 {
-		t.Errorf("pending %d", m.Pending())
+	if len(m.items) != 3 {
+		t.Errorf("pending %d", len(m.items))
 	}
 	m, _ = m.Handle("a")
-	if m.Pending() != 2 {
-		t.Errorf("pending %d", m.Pending())
+	if len(m.items) != 2 {
+		t.Errorf("pending %d", len(m.items))
 	}
 }

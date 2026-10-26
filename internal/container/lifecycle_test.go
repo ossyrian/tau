@@ -279,7 +279,7 @@ func TestAFailedAfterIsReportedButTheContainerStays(t *testing.T) {
 	lc := newLC(t, f)
 	lc.After = func() error { return errors.New("sso expired") }
 	got, err := lc.Start()
-	if err == nil || !strings.Contains(err.Error(), "sso expired") || !strings.Contains(err.Error(), "tau proxy reload") {
+	if err == nil || !strings.Contains(err.Error(), "sso expired") || !strings.Contains(err.Error(), "tau proxies reload") {
 		t.Fatalf("got %v", err)
 	}
 	if got == Started {

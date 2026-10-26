@@ -7,7 +7,7 @@
  * responses back from the beacon event stream the subagent writes (see beacon.ts).
  *
  * Each subagent runs in a detached, named tmux session (e.g. `sa-voice-65a45018`)
- * rather than a window in the parent's session, so it shows up in `tau session
+ * rather than a window in the parent's session, so it shows up in `tau sessions
  * list` and the user can watch it independently.
  *
  * Two flavors:
@@ -699,7 +699,7 @@ export function registerManager(pi: ExtensionAPI): void {
 		name: "subagent_create",
 		label: "Subagent: create",
 		description:
-			"Start a new persistent subagent session: another pi in its own named tmux session in this harness. Shows up in `tau session list`. Returns its id. Send to it with subagent_send, read with subagent_read, destroy with subagent_destroy.",
+			"Start a new persistent subagent session: another pi in its own named tmux session in this harness. Shows up in `tau sessions list`. Returns its id. Send to it with subagent_send, read with subagent_read, destroy with subagent_destroy.",
 		parameters: CreateParams,
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			try {

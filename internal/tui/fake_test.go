@@ -18,6 +18,7 @@ import (
 	"github.com/ossyrian/tau/internal/proxy"
 	"github.com/ossyrian/tau/internal/session"
 	"github.com/ossyrian/tau/internal/skills"
+	"github.com/ossyrian/tau/internal/workspace"
 )
 
 // fakeAPI records calls and returns canned data.
@@ -35,6 +36,7 @@ type fakeAPI struct {
 	buildOut string
 	attach   []string
 
+	entries    []workspace.Entry
 	proxies    config.Proxies
 	proxyVars  map[string][]proxy.Var
 	proxyError error // returned by every proxy call
@@ -112,6 +114,14 @@ func (f *fakeAPI) UnsetProxyVar(n, k string) (bool, error) {
 func (f *fakeAPI) ReloadProxies() error { return f.rec("reloadproxies") }
 func (f *fakeAPI) RefreshProxies(names []string) error {
 	return f.rec("refreshproxies:" + strings.Join(names, ","))
+}
+
+func (f *fakeAPI) Workspaces() ([]workspace.Entry, error) { return f.entries, f.err }
+func (f *fakeAPI) AddWorkspace(src, name string, live bool) (workspace.Result, error) {
+	return workspace.Result{Entry: workspace.Entry{Name: name}}, f.rec(fmt.Sprintf("addws:%s:%s:%v", src, name, live))
+}
+func (f *fakeAPI) RemoveWorkspace(name string) (workspace.Entry, error) {
+	return workspace.Entry{Name: name}, f.rec("rmws:" + name)
 }
 
 func (f *fakeAPI) LoadConfig() (*config.Config, error) { return config.Load(f.home, nil) }

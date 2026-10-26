@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ossyrian/tau/internal/container"
@@ -13,7 +17,6 @@ import (
 // terminal makes the harness behave as if stdout were a terminal.
 func terminal(h *harness) {
 	h.app.Pretty = true
-	h.app.Width = 100
 }
 
 func plain(h *harness) string { return ansi.Strip(h.out.String()) }
@@ -36,8 +39,46 @@ func themed(t *testing.T, out string) {
 	}
 }
 
-func TestPipedOutputHasNoEscapesAndNoHeaders(t *testing.T) {
-	// The harness is not a terminal: every command must print plain records.
+// rowOf returns the words on the line that has key as one of its words. It
+// does not depend on spacing or on the order of the columns.
+func rowOf(t *testing.T, out, key string) []string {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		if f := strings.Fields(l); slices.Contains(f, key) {
+			return f
+		}
+	}
+	t.Fatalf("no row for %q in:\n%s", key, out)
+	return nil
+}
+
+// assertHasWords fails unless every want is a word of the row.
+func assertHasWords(t *testing.T, row []string, want ...string) {
+	t.Helper()
+	for _, w := range want {
+		if !slices.Contains(row, w) {
+			t.Errorf("row %q lacks %q", row, w)
+		}
+	}
+}
+
+// assertProfileFirst fails unless the header's first word is PROFILE and every
+// other line starts with the profile's name.
+func assertProfileFirst(t *testing.T, out, profile string) {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if f := strings.Fields(lines[0]); len(f) == 0 || f[0] != "PROFILE" {
+		t.Errorf("PROFILE is not the first column: %q", lines[0])
+	}
+	for _, l := range lines[1:] {
+		if f := strings.Fields(l); len(f) == 0 || f[0] != profile {
+			t.Errorf("row does not start with the profile %q: %q", profile, l)
+		}
+	}
+}
+
+func TestPipedOutputHasNoEscapes(t *testing.T) {
+	// The harness is not a terminal: no command may print colour codes.
 	h, life := coreHarness(t, goodBase, "")
 	life.st = container.State{Exists: true, Running: true, Env: map[string]string{}}
 	h.app.Lifecycle = &fakeLC{}
@@ -47,129 +88,134 @@ func TestPipedOutputHasNoEscapesAndNoHeaders(t *testing.T) {
 		paths: []skills.PathInfo{{Path: "/p", Found: true, Skills: 1}},
 	}
 	for _, args := range [][]string{
-		{"status"}, {"skills", "list"}, {"skills", "paths", "list"}, {"env", "list"}, {"packages", "list"}, {"session", "list"}, {"start"},
+		{"status"}, {"skills", "list"}, {"skills", "paths", "list"}, {"env", "list"}, {"packages", "list"}, {"sessions", "list"}, {"start"},
 	} {
 		h.out.Reset()
 		if code := h.app.Run(args); code != 0 {
 			t.Fatalf("%v: %s", args, h.err)
 		}
-		out := h.out.String()
-		if strings.Contains(out, "\x1b") {
-			t.Errorf("%v: escape codes in piped output: %q", args, out)
-		}
-		for _, hdr := range []string{"Skills\n", "Packages\n", "Sessions\n", "Skill paths\n", "State:"} {
-			if strings.Contains(out, hdr) {
-				t.Errorf("%v: header %q in piped output: %q", args, hdr, out)
-			}
+		if strings.Contains(h.out.String(), "\x1b") {
+			t.Errorf("%v: escape codes in piped output: %q", args, h.out)
 		}
 	}
 }
 
-func TestPipedEmptyResultsPrintNothing(t *testing.T) {
+func TestEveryListPrintsOnlyAnUpperCaseHeaderWhenEmpty(t *testing.T) {
 	h, _ := coreHarness(t, "packages: {}\n", "")
 	h.app.Core.Skill = fakeSk{}
 	withSessions(h)
-	for _, args := range [][]string{{"skills", "list"}, {"skills", "paths", "list"}, {"env", "list"}, {"packages", "list"}, {"packages", "diff"}, {"session", "list"}} {
+	wh, _, _ := wsHarness(t)
+	for _, c := range []struct {
+		h    *harness
+		args []string
+	}{
+		{h, []string{"skills", "list"}}, {h, []string{"skills", "paths", "list"}}, {h, []string{"env", "list"}},
+		{h, []string{"packages", "list"}}, {h, []string{"packages", "diff"}}, {h, []string{"sessions", "list"}},
+		{wh, []string{"workspaces", "list"}},
+	} {
+		c.h.out.Reset()
+		if code := c.h.app.Run(c.args); code != 0 {
+			t.Fatalf("%v: %s", c.args, c.h.err)
+		}
+		lines := strings.Split(strings.TrimRight(c.h.out.String(), "\n"), "\n")
+		if len(lines) != 1 || lines[0] != strings.ToUpper(lines[0]) || lines[0] == "" {
+			t.Errorf("%v: want only an upper-case header, got %q", c.args, c.h.out)
+		}
+		assertProfileFirst(t, c.h.out.String(), "default")
+	}
+}
+
+func TestEveryProfileListPutsTheProfileFirstOnEveryRow(t *testing.T) {
+	h, _ := coreHarness(t, goodBase, "packages:\n  r: {script: x}\n")
+	h.app.Core.Skill = fakeSk{
+		list:  []skills.Skill{{Name: "a", Path: "/p/a", State: skills.Inactive}},
+		paths: []skills.PathInfo{{Path: "/p", Found: true, Skills: 1}},
+	}
+	withSessions(h).out["list-sessions"] = "main|1700000000|1700000000\n"
+	os.WriteFile(filepath.Join(h.home, ".env"), []byte("A=1\n"), 0o600)
+	for _, args := range [][]string{
+		{"skills", "list"}, {"skills", "paths", "list"}, {"env", "list"},
+		{"packages", "list"}, {"packages", "diff"}, {"sessions", "list"}, {"status"},
+	} {
 		h.out.Reset()
 		if code := h.app.Run(args); code != 0 {
 			t.Fatalf("%v: %s", args, h.err)
 		}
-		if h.out.Len() != 0 {
-			t.Errorf("%v: %q would read as a record", args, h.out)
-		}
+		assertProfileFirst(t, h.out.String(), "default")
 	}
+	ph, _ := proxyHarness(t)
+	ph.app.Run([]string{"proxies", "list"})
+	assertProfileFirst(t, ph.out.String(), "default")
+	wh, _, _ := wsHarness(t)
+	wh.app.Run([]string{"workspaces", "add", srcDir(t, "app")})
+	wh.out.Reset()
+	wh.app.Run([]string{"workspaces", "list"})
+	assertProfileFirst(t, wh.out.String(), "default")
 }
 
-func TestTerminalStatusIsALabelledBlock(t *testing.T) {
-	h, life := coreHarness(t, goodBase, "packages:\n  x: {script: echo x}\n")
+func TestTerminalListsStayInThePalette(t *testing.T) {
+	h, _ := coreHarness(t, goodBase, "")
 	terminal(h)
-	life.st = container.State{Exists: true, Running: true, Env: map[string]string{}}
+	h.app.Core.Skill = fakeSk{
+		list:  []skills.Skill{{Name: "a", Path: "/p/a", State: skills.Synced}, {Name: "b", Path: "/p/b", State: skills.Missing}},
+		paths: []skills.PathInfo{{Path: "/p", Found: true}, {Path: "/gone"}},
+	}
+	withSessions(h).out["list-sessions"] = "main|1700000000|1700000000\n"
+	for _, args := range [][]string{{"skills", "list"}, {"skills", "paths", "list"}, {"sessions", "list"}, {"packages", "list"}, {"status"}} {
+		h.out.Reset()
+		h.app.Run(args)
+		themed(t, h.out.String())
+	}
+	ph, _ := proxyHarness(t)
+	terminal(ph)
+	ph.app.Run([]string{"proxies", "list"})
+	themed(t, ph.out.String())
+}
+
+func TestTheTableIsTheSameOnATerminalExceptForColour(t *testing.T) {
+	piped, _ := coreHarness(t, goodBase, "packages:\n  x: {script: echo x}\n")
+	piped.app.Run([]string{"status"})
+	term, _ := coreHarness(t, goodBase, "packages:\n  x: {script: echo x}\n")
+	terminal(term)
+	term.app.Run([]string{"status"})
+	if plain(term) != piped.out.String() {
+		t.Errorf("terminal:\n%s\npiped:\n%s", plain(term), piped.out)
+	}
+	if !strings.Contains(term.out.String(), "\x1b") {
+		t.Error("a terminal gets colour")
+	}
+	themed(t, term.out.String())
+}
+
+func TestNoColorKeepsTheTerminalFreeOfEscapes(t *testing.T) {
+	h, _ := coreHarness(t, goodBase, "")
+	terminal(h)
+	h.app.NoColor = true
 	h.app.Run([]string{"status"})
-	out := plain(h)
-	for _, want := range []string{"container", "running", "profile", "1 need a decision", "in sync"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("lacks %q:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "=") || strings.Contains(out, "profile=") {
-		t.Errorf("machine syntax leaked into the terminal form:\n%s", out)
-	}
-	themed(t, h.out.String())
-}
-
-func TestTerminalSessionLsLooksLikeSkillsLs(t *testing.T) {
-	h := newHarness(t, "", "")
-	terminal(h)
-	d := withSessions(h)
-	d.out["list-sessions"] = "main|1700000000|1700003600\nsa-worker|1700000100|1700000200\n"
-	if code := h.app.Run([]string{"session", "list"}); code != 0 {
-		t.Fatal(h.err)
-	}
-	got := strings.Split(strings.TrimRight(plain(h), "\n"), "\n")
-	if len(got) != 6 || got[0] != "Sessions" || got[1] != "" {
-		t.Fatalf("got:\n%s", strings.Join(got, "\n"))
-	}
-	if strings.TrimRight(got[2], " ") != "main" || strings.TrimRight(got[4], " ") != "sa-worker" {
-		t.Errorf("names: %q", got)
-	}
-	for _, want := range []string{"Type: session", "Created: 2023-11-14 22:13:20", "Last active: 2023-11-14 23:13:20"} {
-		if !strings.Contains(got[3], want) {
-			t.Errorf("details lack %q: %q", want, got[3])
-		}
-	}
-	if !strings.Contains(got[5], "Type: subagent") {
-		t.Errorf("subagent not marked: %q", got[5])
-	}
-	if strings.Contains(plain(h), "T22:") {
-		t.Errorf("RFC 3339 leaked into the terminal form:\n%s", plain(h))
-	}
-	themed(t, h.out.String())
-}
-
-func TestPipedPackagesLsListsNameAsAndNeeds(t *testing.T) {
-	h := newHarness(t, "packages:\n  pg: {apt: [x]}\n  tool: {script: s, as: user, needs: [pg]}\n", "")
-	h.app.Run([]string{"packages", "list"})
-	if h.out.String() != "pg\troot\t\ntool\tuser\tpg\n" {
-		t.Errorf("got %q", h.out)
+	if strings.Contains(h.out.String(), "\x1b") {
+		t.Errorf("escapes: %q", h.out)
 	}
 }
 
-func TestTerminalDiffReadsInWordsButPipedDiffUsesTokens(t *testing.T) {
-	base, runtime := "packages:\n  a: {script: s}\n", "packages:\n  a: {script: s}\n  r: {script: r}\n"
-	p := newHarness(t, base, runtime)
-	p.app.Run([]string{"packages", "diff"})
-	if p.out.String() != "runtime-only\tr\n" {
-		t.Errorf("piped %q", p.out)
-	}
-	h := newHarness(t, base, runtime)
-	terminal(h)
-	h.app.Run([]string{"packages", "diff"})
-	if !strings.Contains(plain(h), "added at runtime") || !strings.Contains(plain(h), "CHANGE") {
-		t.Errorf("terminal %q", plain(h))
-	}
-}
-
-func TestTerminalActionsGetAMarkedLineWithAHint(t *testing.T) {
+func TestADoneLineOnATerminalIsOneLineNamingTheSubject(t *testing.T) {
 	h, _ := coreHarness(t, goodBase, "")
 	terminal(h)
 	h.app.Core.Skill = fakeSk{}
 	h.app.Run([]string{"skills", "activate", "voice"})
-	if plain(h) != "✓ activated voice  restart to apply\n" {
-		t.Errorf("got %q", plain(h))
+	if out := plain(h); strings.Count(out, "\n") != 1 || !strings.Contains(out, "voice") {
+		t.Errorf("got %q", out)
 	}
-	themed(t, h.out.String())
 }
 
-func TestTerminalSkillsLsStatesTheStatusOnce(t *testing.T) {
-	// State already says whether a skill is active; a second field would repeat it.
-	h, _ := coreHarness(t, goodBase, "")
-	terminal(h)
-	h.app.Core.Skill = fakeSk{list: []skills.Skill{
-		{Name: "a", Path: "/p/a", Active: true, State: skills.Synced},
-		{Name: "b", Path: "/p/b", State: skills.Inactive},
-	}}
-	h.app.Run([]string{"skills", "list"})
-	if strings.Contains(plain(h), "Active:") {
-		t.Errorf("redundant field:\n%s", plain(h))
+func TestAgo(t *testing.T) {
+	a := &App{Now: func() time.Time { return time.Unix(1_000_000, 0) }}
+	for secs, want := range map[int64]string{
+		10: "less than a minute ago", 60: "1 minute ago", 150: "2 minutes ago",
+		3600: "1 hour ago", 7200: "2 hours ago", 47 * 3600: "47 hours ago",
+		48 * 3600: "2 days ago", 3 * 86400: "3 days ago",
+	} {
+		if got := a.ago(time.Unix(1_000_000-secs, 0)); got != want {
+			t.Errorf("%ds: got %q want %q", secs, got, want)
+		}
 	}
 }

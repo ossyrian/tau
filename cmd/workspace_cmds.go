@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ossyrian/tau/internal/render"
-	"github.com/ossyrian/tau/internal/theme"
 	"github.com/ossyrian/tau/internal/workspace"
 	"github.com/spf13/cobra"
 )
@@ -15,7 +14,7 @@ func (a *App) note(format string, args ...any) {
 	fmt.Fprintf(a.Stderr, "tau: "+format+"\n", args...)
 }
 
-func (a *App) workspaceCmd() *cobra.Command {
+func (a *App) workspacesCmd() *cobra.Command {
 	var name string
 	var live bool
 	add := &cobra.Command{
@@ -34,7 +33,7 @@ func (a *App) workspaceCmd() *cobra.Command {
 				return err
 			}
 			a.reportAdd(res)
-			// stdout: the host path only, so $(tau workspace add ...) works in scripts
+			// stdout: the host path only, so $(tau workspaces add ...) works in scripts
 			fmt.Fprintln(a.Stdout, res.Entry.Host)
 			return nil
 		},
@@ -50,19 +49,11 @@ func (a *App) workspaceCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		items := make([]render.Item, len(entries))
+		rows := make([][]string, len(entries))
 		for i, e := range entries {
-			items[i] = render.Item{
-				Title:  e.Name,
-				Fields: []string{e.Name, string(e.Kind), e.Container, e.Host},
-				Details: []render.Detail{
-					{Label: "Kind", Value: kindText(e.Kind)},
-					{Label: "Agent sees", Value: e.Container, Style: theme.Dim},
-					{Label: "On this machine", Value: e.Host, Style: theme.Dim},
-				},
-			}
+			rows[i] = []string{e.Name, kindText(e.Kind), e.Container, e.Host}
 		}
-		a.out().List("Workspace", items, "no workspaces")
+		a.profileTable([]render.Column{{Title: "NAME"}, {Title: "KIND"}, {Title: "AGENT SEES"}, {Title: "HOST PATH"}}, rows)
 		return nil
 	}}
 
@@ -98,12 +89,12 @@ func (a *App) workspaceCmd() *cobra.Command {
 		fmt.Fprintln(a.Stdout, p)
 		return nil
 	}}
-	return parent("workspace", "manage workspace projects", add, ls, rm, cdc)
+	return parent("workspaces", "manage workspace projects", add, ls, rm, cdc)
 }
 
 func kindText(k workspace.Kind) string {
 	if k == workspace.Live {
-		return "live (your real directory)"
+		return "live"
 	}
 	return "copy"
 }

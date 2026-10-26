@@ -26,7 +26,7 @@ The user's term→referent glossary (`~/.pi/agent/glossary.md`) is a separate th
 Update the relevant index as a side effect of changing the directory. No cron, no periodic sweep — you keep it current because you are the one touching the directory.
 
 - **Scripts** — you added, removed, or materially changed a script in `~/scripts/` → add, drop, or fix its entry in `~/scripts/INDEX.md`.
-- **Workspaces** — a workspace appeared, went away, or you learned what an unlabeled one is → update `/workspace/INDEX.md`. (Workspaces are added/removed host-side with `tau workspace add|remove`; you do not create them, but you do keep the index describing them accurate.)
+- **Workspaces** — a workspace appeared, went away, or you learned what an unlabeled one is → update `/workspace/INDEX.md`. (Workspaces are added/removed host-side with `tau workspaces add|remove`; you do not create them, but you do keep the index describing them accurate.)
 
 ## Entry format
 

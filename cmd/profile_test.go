@@ -25,7 +25,7 @@ func withProfiles(t *testing.T, h *harness, workConfig string) string {
 
 func TestProfileNewCreatesItsDirectories(t *testing.T) {
 	h := newHarness(t, "", "")
-	if code := h.app.Run([]string{"profile", "new", "work"}); code != 0 {
+	if code := h.app.Run([]string{"profiles", "new", "work"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	if st, err := os.Stat(filepath.Join(h.home, "profiles", "work", "pi")); err != nil || !st.IsDir() {
@@ -39,12 +39,12 @@ func TestProfileNewCreatesItsDirectories(t *testing.T) {
 func TestProfileNewRefusesBadAndDuplicateNames(t *testing.T) {
 	h := newHarness(t, "", "")
 	for _, bad := range []string{"Bad Name", "default", "root"} {
-		if code := h.app.Run([]string{"profile", "new", bad}); code != 1 {
+		if code := h.app.Run([]string{"profiles", "new", bad}); code != 1 {
 			t.Errorf("%q accepted", bad)
 		}
 	}
-	h.app.Run([]string{"profile", "new", "work"})
-	if code := h.app.Run([]string{"profile", "new", "work"}); code != 1 || !strings.Contains(h.err.String(), "already exists") {
+	h.app.Run([]string{"profiles", "new", "work"})
+	if code := h.app.Run([]string{"profiles", "new", "work"}); code != 1 || !strings.Contains(h.err.String(), "already exists") {
 		t.Errorf("duplicate: %d %q", code, h.err)
 	}
 }
@@ -53,31 +53,34 @@ func TestProfileLsListsTheDefaultFirstWithItsWorkspaceMode(t *testing.T) {
 	h := newHarness(t, "", "")
 	dir := withProfiles(t, h, "workspaces:\n  mode: shared\n")
 	_ = dir
-	if code := h.app.Run([]string{"profile", "list"}); code != 0 {
+	if code := h.app.Run([]string{"profiles", "list"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	if want := "default\tpi\towner\nwork\tp-work\tshared\n"; h.out.String() != want {
-		t.Errorf("got %q want %q", h.out, want)
+	lines := strings.Split(strings.TrimRight(h.out.String(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("want a header and two profiles, got %q", lines)
 	}
+	assertHasWords(t, strings.Fields(lines[1]), "default", "pi", "owner")
+	assertHasWords(t, strings.Fields(lines[2]), "work", "p-work", "shared")
 }
 
 func TestProfileWorkspacesSetsTheMode(t *testing.T) {
 	h := newHarness(t, "", "")
 	dir := withProfiles(t, h, "packages: {}\n")
-	if code := h.app.Run([]string{"profile", "workspaces", "work", "shared"}); code != 0 {
+	if code := h.app.Run([]string{"profiles", "workspaces", "work", "shared"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, "config.yaml"))
 	if !strings.Contains(string(data), "mode: shared") || !strings.Contains(string(data), "packages") {
 		t.Errorf("config:\n%s", data)
 	}
-	if code := h.app.Run([]string{"profile", "workspaces", "work", "sometimes"}); code != 1 {
+	if code := h.app.Run([]string{"profiles", "workspaces", "work", "sometimes"}); code != 1 {
 		t.Error("a bad mode was accepted")
 	}
-	if code := h.app.Run([]string{"profile", "workspaces", "default", "shared"}); code != 1 || !strings.Contains(h.err.String(), "owns the shared workspace") {
+	if code := h.app.Run([]string{"profiles", "workspaces", "default", "shared"}); code != 1 || !strings.Contains(h.err.String(), "owns the shared workspace") {
 		t.Errorf("default: %d %q", code, h.err)
 	}
-	if code := h.app.Run([]string{"profile", "workspaces", "ghost", "shared"}); code != 1 {
+	if code := h.app.Run([]string{"profiles", "workspaces", "ghost", "shared"}); code != 1 {
 		t.Error("a missing profile was accepted")
 	}
 }
@@ -86,7 +89,7 @@ func TestTheProfileFlagPicksWhichConfigACommandReads(t *testing.T) {
 	h := newHarness(t, "packages:\n  basepkg: {script: echo b}\n", "")
 	withProfiles(t, h, "packages:\n  workpkg: {script: echo w}\n")
 	h.app.Run([]string{"packages", "list"})
-	if !strings.HasPrefix(h.out.String(), "basepkg\t") || strings.Contains(h.out.String(), "workpkg") {
+	if !strings.Contains(h.out.String(), "basepkg") || strings.Contains(h.out.String(), "workpkg") {
 		t.Errorf("default: %q", h.out)
 	}
 	for _, args := range [][]string{{"packages", "list", "--profile", "work"}, {"-p", "work", "packages", "list"}} {
@@ -94,7 +97,7 @@ func TestTheProfileFlagPicksWhichConfigACommandReads(t *testing.T) {
 		if code := h.app.Run(args); code != 0 {
 			t.Fatalf("%v: %s", args, h.err)
 		}
-		if !strings.HasPrefix(h.out.String(), "workpkg\t") || strings.Contains(h.out.String(), "basepkg") {
+		if !strings.Contains(h.out.String(), "workpkg") || strings.Contains(h.out.String(), "basepkg") {
 			t.Errorf("%v: %q", args, h.out)
 		}
 	}
@@ -107,19 +110,19 @@ func TestTAUPROFILEIsTheDefaultSelectionAndTheFlagBeatsIt(t *testing.T) {
 		return map[string]string{"TAU_HOME": h.home, "TAU_REPO": h.repo, "TAU_PROFILE": "work"}[k]
 	}
 	h.app.Run([]string{"packages", "list"})
-	if !strings.HasPrefix(h.out.String(), "workpkg\t") {
+	if !strings.Contains(h.out.String(), "workpkg") {
 		t.Errorf("env: %q", h.out)
 	}
 	h.out.Reset()
 	h.app.Run([]string{"packages", "list", "-p", "default"})
-	if !strings.HasPrefix(h.out.String(), "basepkg\t") {
+	if !strings.Contains(h.out.String(), "basepkg") {
 		t.Errorf("flag over env: %q", h.out)
 	}
 }
 
 func TestAnUnknownProfileFailsBeforeAnythingRuns(t *testing.T) {
 	h := newHarness(t, "packages:\n  a: {script: echo a}\n", "")
-	if code := h.app.Run([]string{"packages", "list", "-p", "ghost"}); code != 1 || !strings.Contains(h.err.String(), "tau profile new ghost") {
+	if code := h.app.Run([]string{"packages", "list", "-p", "ghost"}); code != 1 || !strings.Contains(h.err.String(), "tau profiles new ghost") {
 		t.Errorf("exit %d err %q", code, h.err)
 	}
 	if h.out.Len() != 0 {

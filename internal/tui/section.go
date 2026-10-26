@@ -13,15 +13,12 @@ type section interface {
 	Enter() tea.Cmd
 	// Update handles a message and returns a command.
 	Update(msg tea.Msg) tea.Cmd
-	// View returns exactly the lines to draw inside cols×rows.
-	View(cols, rows int) []string
+	// View draws the section in exactly w×h cells. A section is one pane, or
+	// a list pane above a detail pane.
+	View(w, h int) string
 	// Keys lists the bindings shown in the help line.
 	Keys() []bkey.Binding
 	// Capturing is true while a text input has the keyboard, so the root
 	// does not take q, tab or digits.
 	Capturing() bool
-}
-
-func binding(k, help, desc string) bkey.Binding {
-	return bkey.NewBinding(bkey.WithKeys(k), bkey.WithHelp(help, desc))
 }

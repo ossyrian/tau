@@ -24,14 +24,6 @@ type Resolve struct {
 	resolved int
 	err      string
 	settled  bool
-	embedded bool
-}
-
-// Embedded returns the screen for use inside another one: its help no longer
-// offers to quit.
-func (m Resolve) Embedded() Resolve {
-	m.embedded = true
-	return m
 }
 
 // NewResolve lists the drift in cfg, in the order it appears in the runtime file.
@@ -98,12 +90,8 @@ func (m Resolve) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return next, nil
 }
 
-// Pending is the number of items still waiting for a decision.
-func (m Resolve) Pending() int { return len(m.items) }
-
 // Handle applies one key (a, r, up/k, down/j) and reports whether the last
-// item was just resolved. It never quits the program, so other screens can
-// embed Resolve.
+// item was just resolved. It never quits the program.
 func (m Resolve) Handle(key string) (next Resolve, finished bool) {
 	switch key {
 	case "up", "k":
@@ -122,24 +110,27 @@ func (m Resolve) Handle(key string) (next Resolve, finished bool) {
 	return m, false
 }
 
+// actionFor is the change to make to a package that drifted. Accepting keeps
+// the runtime version in config.yaml; rejecting drops it.
+func actionFor(runtimeOnly, accept bool) config.Action {
+	switch {
+	case runtimeOnly && accept:
+		return config.Promote
+	case runtimeOnly:
+		return config.Discard
+	case accept:
+		return config.Adopt
+	}
+	return config.Revert
+}
+
 // act accepts (keep the runtime version in config.yaml) or rejects (drop it) the selected item.
 func (m Resolve) act(accept bool) (Resolve, bool) {
 	if len(m.items) == 0 {
 		return m, false
 	}
 	it := m.items[m.cursor]
-	var action config.Action
-	switch {
-	case it.runtimeOnly && accept:
-		action = config.Promote
-	case it.runtimeOnly:
-		action = config.Discard
-	case accept:
-		action = config.Adopt
-	default:
-		action = config.Revert
-	}
-	if err := m.cfg.Apply(it.name, action); err != nil {
+	if err := m.cfg.Apply(it.name, actionFor(it.runtimeOnly, accept)); err != nil {
 		m.err = fmt.Sprintf("%s: %v", it.name, err)
 		return m, false
 	}
@@ -211,9 +202,6 @@ func (m Resolve) help() string {
 		return ""
 	}
 	quit := "   q quit"
-	if m.embedded {
-		quit = ""
-	}
 	if m.items[m.cursor].runtimeOnly {
 		return dimStyle.Render("a add to config.yaml   r discard   ↑/↓ move" + quit)
 	}

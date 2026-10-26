@@ -2,71 +2,17 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	bkey "charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/ossyrian/tau/internal/skills"
 )
 
-var skillTabs = []string{"skills", "paths"}
-
-const (
-	tabSkills = iota
-	tabPaths
-)
-
-// skillRow is one skill in the list.
-type skillRow struct{ s skills.Skill }
-
-func (r skillRow) FilterValue() string { return r.s.Name + " " + r.s.Path }
-func (r skillRow) Title() string {
-	mark := dimStyle.Render("○")
-	if r.s.Active {
-		mark = okStyle.Render("●")
-	}
-	return mark + " " + r.s.Name + "  " + stateStyle(r.s.State).Render(string(r.s.State))
-}
-func (r skillRow) Description() string { return "  " + r.s.Path }
-
-func stateStyle(s skills.State) lipgloss.Style {
-	switch s {
-	case skills.Synced:
-		return okStyle
-	case skills.Pending, skills.Stale, skills.Configured:
-		return warnStyle
-	case skills.Missing:
-		return errStyle
-	}
-	return dimStyle
-}
-
-// pathRow is one skill path in the list.
-type pathRow struct{ p skills.PathInfo }
-
-func (r pathRow) FilterValue() string { return r.p.Path }
-func (r pathRow) Title() string       { return r.p.Path }
-func (r pathRow) Description() string {
-	if !r.p.Found {
-		return errStyle.Render("not found")
-	}
-	if r.p.Skills == 1 {
-		return "1 skill"
-	}
-	return fmt.Sprintf("%d skills", r.p.Skills)
-}
-
-type skillsLoadedMsg struct {
-	skills []skills.Skill
-	all    []skills.Skill
-	paths  []skills.PathInfo
-	err    error
-}
-
-// What the text input is for, while it has the keyboard.
+// skillsMode is what the text input is for, while it has the keyboard.
 type skillsMode int
 
 const (
@@ -75,17 +21,27 @@ const (
 	modeRenamePath
 )
 
+type skillsLoadedMsg struct {
+	profile string
+	skills  []skills.Skill
+	paths   []skills.PathInfo
+	err     error
+}
+
+// skillsSection is two panes: the skills as a table, and the selected skill's
+// SKILL.md below it. The "p" key swaps the table for the skill paths.
 type skillsSection struct {
-	api API
-	tab int
+	api     API
+	profile string
 
 	all    []skills.Skill
 	paths  []skills.PathInfo
 	err    error
 	loaded bool
 
-	skillList list.Model
-	pathList  list.Model
+	list    *master // skills and SKILL.md
+	pathTab *master // skill directories, a single pane
+	onPaths bool
 
 	mode   skillsMode
 	input  textinput.Model
@@ -94,135 +50,123 @@ type skillsSection struct {
 
 func newSkills(api API) section {
 	return &skillsSection{
-		api:       api,
-		skillList: newFilterList(),
-		pathList:  newList(nil, 30, 10),
-		input:     newInput("", 50),
+		api:     api,
+		list:    newMaster(true, "PROFILE", "NAME", "STATE", "PATH"),
+		pathTab: newMaster(false, "PROFILE", "PATH", "STATE", "SKILLS"),
+		input:   newInput("", 50),
 	}
 }
 
 func (s *skillsSection) Name() string { return "skills" }
-func (s *skillsSection) Capturing() bool {
-	return s.mode != modeBrowse || s.skillList.SettingFilter()
+
+func (s *skillsSection) current() *master {
+	if s.onPaths {
+		return s.pathTab
+	}
+	return s.list
 }
 
+func (s *skillsSection) Capturing() bool { return s.mode != modeBrowse || s.current().Capturing() }
+
 func (s *skillsSection) Keys() []bkey.Binding {
-	switch {
-	case s.skillList.SettingFilter():
-		return []bkey.Binding{binding("enter", "enter", "keep filter"), binding("esc", "esc", "clear")}
-	case s.mode != modeBrowse:
+	if s.mode != modeBrowse {
 		return []bkey.Binding{binding("enter", "enter", "save"), binding("esc", "esc", "cancel")}
 	}
-	tabs := binding("left", "←/→", "tab")
-	if s.tab == tabPaths {
-		return []bkey.Binding{binding("a", "a", "add"), binding("e", "e", "rename"), binding("d", "d", "remove"), tabs}
+	keys := s.current().Keys()
+	if s.current().Capturing() {
+		return keys
 	}
-	return []bkey.Binding{
-		binding("space", "space", "toggle"), binding("/", "/", "search"),
-		binding("r", "r", "restart to apply"), tabs,
+	if s.onPaths {
+		return append([]bkey.Binding{binding("a", "a", "add"), binding("e", "e", "rename"), binding("d", "d", "remove"), binding("p", "p", "skills")}, keys...)
 	}
+	return append([]bkey.Binding{binding("space", "space", "toggle"), binding("p", "p", "paths"), binding("r", "r", "restart")}, keys...)
 }
 
 func (s *skillsSection) Enter() tea.Cmd {
 	api := s.api
 	return func() tea.Msg {
+		profile := api.Status().Profile
 		l, err := api.Skills()
 		if err != nil {
-			return skillsLoadedMsg{err: err}
+			return skillsLoadedMsg{profile: profile, err: err}
 		}
 		p, err := api.SkillPaths()
-		return skillsLoadedMsg{skills: l, paths: p, err: err}
+		return skillsLoadedMsg{profile: profile, skills: l, paths: p, err: err}
 	}
 }
 
 func (s *skillsSection) selectedSkill() (skills.Skill, bool) {
-	r, ok := s.skillList.SelectedItem().(skillRow)
-	return r.s, ok
+	r, ok := s.list.pick.Selected()
+	if !ok {
+		return skills.Skill{}, false
+	}
+	for _, k := range s.all {
+		if k.Name == r.Key {
+			return k, true
+		}
+	}
+	return skills.Skill{}, false
 }
 
 func (s *skillsSection) selectedPath() (skills.PathInfo, bool) {
-	i := s.pathList.Index()
-	if i < 0 || i >= len(s.paths) {
+	r, ok := s.pathTab.pick.Selected()
+	if !ok {
 		return skills.PathInfo{}, false
 	}
-	return s.paths[i], true
-}
-
-// setSkills replaces the list's items, keeping the selection on the same skill.
-func (s *skillsSection) setSkills(all []skills.Skill) tea.Cmd {
-	keep := ""
-	if cur, ok := s.selectedSkill(); ok {
-		keep = cur.Name
-	}
-	rows := make([]list.Item, len(all))
-	for i, k := range all {
-		rows[i] = skillRow{k}
-	}
-	cmd := s.skillList.SetItems(rows)
-	for i, it := range s.skillList.VisibleItems() {
-		if it.(skillRow).s.Name == keep {
-			s.skillList.Select(i)
+	for _, p := range s.paths {
+		if p.Path == r.Key {
+			return p, true
 		}
 	}
-	return cmd
+	return skills.PathInfo{}, false
+}
+
+func (s *skillsSection) setData(m skillsLoadedMsg) {
+	s.err, s.loaded, s.profile, s.all, s.paths = m.err, true, m.profile, m.skills, m.paths
+	rows := make([]pickerRow, len(s.all))
+	for i, k := range s.all {
+		rows[i] = pickerRow{Key: k.Name, Cells: []string{s.profile, k.Name, string(k.State), k.Path}, Search: k.Name}
+	}
+	s.list.pick.SetRows(rows)
+	prows := make([]pickerRow, len(s.paths))
+	for i, p := range s.paths {
+		state := "found"
+		if !p.Found {
+			state = "missing"
+		}
+		prows[i] = pickerRow{Key: p.Path, Cells: []string{s.profile, p.Path, state, fmt.Sprint(p.Skills)}}
+	}
+	s.pathTab.pick.SetRows(prows)
 }
 
 func (s *skillsSection) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case skillsLoadedMsg:
-		s.err, s.loaded, s.all, s.paths = msg.err, true, msg.skills, msg.paths
-		keepPath := ""
-		if cur, ok := s.selectedPath(); ok {
-			keepPath = cur.Path
-		}
-		cmd := s.setSkills(s.all)
-		rows := make([]list.Item, len(s.paths))
-		for i, p := range s.paths {
-			rows[i] = pathRow{p}
-		}
-		s.pathList.SetItems(rows)
-		s.pathList.Select(0)
-		for i, p := range s.paths {
-			if p.Path == keepPath {
-				s.pathList.Select(i)
-			}
-		}
-		return cmd
+		s.setData(msg)
+		return nil
 	case reloadMsg:
 		return s.Enter()
 	case tea.KeyPressMsg:
 		switch {
-		case s.skillList.SettingFilter():
-			return s.updateList(&s.skillList, msg)
 		case s.mode != modeBrowse:
 			return s.editing(msg)
+		case s.current().Capturing():
+			return s.current().Update(msg)
 		}
 		return s.browse(msg)
-	default:
-		return s.updateList(&s.skillList, msg) // filter results arrive as messages
 	}
-}
-
-func (s *skillsSection) updateList(l *list.Model, msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-	*l, cmd = l.Update(msg)
-	return cmd
+	return nil
 }
 
 func (s *skillsSection) browse(msg tea.KeyPressMsg) tea.Cmd {
-	k := msg.String()
-	switch k {
-	case "right", "l":
-		s.tab = (s.tab + 1) % len(skillTabs)
-		return nil
-	case "left", "h":
-		s.tab = (s.tab + len(skillTabs) - 1) % len(skillTabs)
+	if msg.String() == "p" {
+		s.onPaths = !s.onPaths
 		return nil
 	}
-	if s.tab == tabPaths {
+	if s.onPaths {
 		return s.browsePaths(msg)
 	}
-	switch k {
+	switch msg.String() {
 	case "space", "enter":
 		return s.toggle()
 	case "r":
@@ -230,9 +174,7 @@ func (s *skillsSection) browse(msg tea.KeyPressMsg) tea.Cmd {
 			return run("restarting", func() (string, error) { return outcomeNotice(s.api.Restart()) })
 		})
 	}
-	var cmd tea.Cmd
-	s.skillList, cmd = s.skillList.Update(msg)
-	return cmd
+	return s.list.Update(msg)
 }
 
 // toggle flips the selected skill. It only edits config.yaml, and pressing
@@ -242,7 +184,6 @@ func (s *skillsSection) toggle() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	// The screen shows config.yaml: a stale skill is shown as inactive.
 	if k.Active {
 		return run("deactivating "+k.Name, func() (string, error) {
 			_, err := s.api.DeactivateSkill(skillRef(k))
@@ -291,9 +232,7 @@ func (s *skillsSection) browsePaths(msg tea.KeyPressMsg) tea.Cmd {
 			})
 		})
 	}
-	var cmd tea.Cmd
-	s.pathList, cmd = s.pathList.Update(msg)
-	return cmd
+	return s.pathTab.Update(msg)
 }
 
 func (s *skillsSection) editing(msg tea.KeyPressMsg) tea.Cmd {
@@ -325,53 +264,46 @@ func (s *skillsSection) editing(msg tea.KeyPressMsg) tea.Cmd {
 	return cmd
 }
 
-func (s *skillsSection) View(cols, rows int) []string {
-	out := []string{tabBar(skillTabs, s.tab), ""}
-	if s.err != nil {
-		return append(out, wrap(errStyle, s.err.Error(), cols-1)...)
+// skillText is the SKILL.md of a skill, highlighted as Markdown.
+func skillText(k skills.Skill) string {
+	if k.Path == "" {
+		return "This skill is not in any search path, so there is no file to show."
 	}
-	if !s.loaded {
-		return append(out, dimStyle.Render("loading…"))
+	data, err := os.ReadFile(filepath.Join(k.Path, "SKILL.md"))
+	if err != nil {
+		return "cannot read SKILL.md: " + err.Error()
 	}
-	if s.tab == tabPaths {
-		return append(out, s.pathsView(cols, rows-len(out))...)
-	}
-	return append(out[:1], s.skillsView(cols, rows-1)...) // the list's title row is the spacer
+	return highlight("markdown", string(data))
 }
 
-func (s *skillsSection) skillsView(cols, rows int) []string {
-	var out []string
-	if len(s.all) == 0 {
-		return append(out, dimStyle.Render("no skills found — add a directory on the paths tab"))
+func (s *skillsSection) View(w, h int) string {
+	if msg := stateMessage(s.err, s.loaded); msg != "" {
+		return messagePane("skills", w, h, msg)
 	}
-	if s.skillList.FilterState() == list.FilterApplied {
-		out = append(out, dimStyle.Render("filter: ")+accentStyle.Render(s.skillList.FilterValue())+dimStyle.Render("   esc clears"))
-	}
-	hint := 0
-	for _, k := range s.all {
-		if k.State == skills.Pending || k.State == skills.Stale {
-			hint = 2
+	if s.mode != modeBrowse {
+		title := "add a skill path"
+		if s.mode == modeRenamePath {
+			title = "rename skill path"
 		}
+		return column(pane(title, w, 3, true, s.input.View()), s.body(w, h-3))
 	}
-	s.skillList.SetSize(cols, max(rows-len(out)-hint, 2))
-	out = append(out, strings.Split(s.skillList.View(), "\n")...)
-	if hint > 0 {
-		out = append(out, "", warnStyle.Render("Pending changes: restart to apply (r)."))
-	}
-	return out
+	return s.body(w, h)
 }
 
-func (s *skillsSection) pathsView(cols, rows int) []string {
-	var out []string
-	switch s.mode {
-	case modeAddPath:
-		out = append(out, titleStyle.Render("Add a skill path"), "", s.input.View(), "")
-	case modeRenamePath:
-		out = append(out, titleStyle.Render("Rename skill path"), "", s.input.View(), "")
+func (s *skillsSection) body(w, h int) string {
+	if s.onPaths {
+		if len(s.paths) == 0 {
+			return messagePane("skill paths", w, h, "no skill paths — press a to add a directory")
+		}
+		return s.pathTab.View(w, h, "skill paths", "", "")
 	}
-	if len(s.paths) == 0 {
-		return append(out, dimStyle.Render("no skill paths — press a to add a directory"))
+	if len(s.all) == 0 {
+		return messagePane("skills", w, h, "no skills found — press p, then a, to add a directory")
 	}
-	s.pathList.SetSize(cols, max(rows-len(out), 2))
-	return append(out, strings.Split(s.pathList.View(), "\n")...)
+	title, body := "SKILL.md", ""
+	if k, ok := s.selectedSkill(); ok {
+		title = k.Name + "/SKILL.md"
+		body = skillText(k)
+	}
+	return s.list.View(w, h, "skills", title, body)
 }

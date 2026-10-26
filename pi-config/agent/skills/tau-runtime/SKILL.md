@@ -25,7 +25,7 @@ Write durable things under `~/.pi/agent/` or `/workspace/`. Nothing else is safe
 
 ## Workspaces
 
-The user's projects are mounted at `/workspace/<name>` (added host-side with `tau workspace add`). A workspace is one of two kinds, and the kind decides whether your edits reach the user's real project:
+The user's projects are mounted at `/workspace/<name>` (added host-side with `tau workspaces add`). A workspace is one of two kinds, and the kind decides whether your edits reach the user's real project:
 
 - **Live bind** — `/workspace/<name>` has its own entry in `/proc/self/mountinfo`, with a root field pointing at the user's real project path on the host. Edits write straight back to the original project.
 - **Copy** — `/workspace/<name>` has no mountinfo entry of its own; the files sit in tau's workspace staging dir on the host, surfaced through the parent `/workspace` mount. Edits do NOT reach the original project source.

@@ -3,8 +3,10 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/ossyrian/tau/internal/config"
 	"github.com/ossyrian/tau/internal/proxy"
 	"github.com/ossyrian/tau/internal/render"
@@ -20,22 +22,22 @@ func (a *App) proxies() (config.Proxies, error) {
 	return a.Core.Proxies()
 }
 
-func (a *App) proxyCmd() *cobra.Command {
+func (a *App) proxiesCmd() *cobra.Command {
 	var show bool
 	envLs := &cobra.Command{Use: "list PROXY", Short: "list a proxy's environment variables", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
 		vars, err := a.Core.ProxyVars(args[0])
 		if err != nil {
 			return err
 		}
-		pairs := make([]render.Pair, len(vars))
+		rows := make([][]string, len(vars))
 		for i, v := range vars {
 			val := proxy.Mask(v.Value)
 			if show {
 				val = v.Value
 			}
-			pairs[i] = render.Pair{Key: v.Key, Value: val}
+			rows[i] = []string{v.Key, val}
 		}
-		a.out().Pairs(pairs, "no variables")
+		a.profileTable([]render.Column{{Title: "KEY"}, {Title: "VALUE"}}, rows)
 		return nil
 	}}
 	envLs.Flags().BoolVar(&show, "show", false, "print values in full")
@@ -82,7 +84,7 @@ func (a *App) proxyCmd() *cobra.Command {
 		}}
 	}
 
-	return parent("proxy", "manage proxies",
+	return parent("proxies", "manage proxies",
 		&cobra.Command{Use: "list", Short: "list available proxies", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 			return a.proxyList()
 		}},
@@ -124,32 +126,36 @@ func (a *App) proxyList() error {
 	for _, n := range p.Active {
 		on[n] = true
 	}
-	items := make([]render.Item, 0, len(p.Defs))
+	rows := make([][]string, 0, len(p.Defs))
 	for _, n := range p.Names() {
 		d := p.Defs[n]
-		use, style := "no", theme.Dim
+		use := "no"
 		if on[n] {
-			use, style = "yes", theme.OK
+			use = "yes"
 		}
-		where := "empty directory"
+		sees := "no"
 		if d.InAgentDirectory() {
-			where = "agent directory"
+			sees = "yes"
 		}
-		details := []render.Detail{
-			{Label: "Agent types", Value: d.AgentCommand},
-			{Label: "Runs", Value: runsWhat(d)},
-			{Label: "Used here", Value: use, Style: style},
-			{Label: "Runs in", Value: where, Style: theme.Dim},
-		}
-		if d.EnvFrom != "" {
-			details = append(details, render.Detail{Label: "Credentials", Value: "minted by env_from", Style: theme.Dim})
-		}
-		if len(d.Deny) > 0 {
-			details = append(details, render.Detail{Label: "Denies", Value: strings.Join(d.Deny, "; "), Style: theme.Dim})
-		}
-		items = append(items, render.Item{Title: n, Note: d.Description, Details: details, Fields: []string{n, d.AgentCommand, use}})
+		rows = append(rows, []string{n, d.AgentCommand, use, sees, programPath(d), d.Description})
 	}
-	a.out().List("Proxies", items, "no proxies defined")
+	a.profileTable([]render.Column{
+		{Title: "NAME"}, {Title: "COMMAND"},
+		{Title: "IN USE", Style: func(c string) lipgloss.Style {
+			if c == "yes" {
+				return theme.OK
+			}
+			return theme.Dim
+		}},
+		// A proxy that sees the agent's files runs whatever hooks the agent left there.
+		{Title: "SEES AGENT FILES", Style: func(c string) lipgloss.Style {
+			if c == "yes" {
+				return theme.Warn
+			}
+			return theme.Dim
+		}},
+		{Title: "PROGRAM PATH"}, {Title: "DESCRIPTION"},
+	}, rows)
 	return nil
 }
 
@@ -169,10 +175,10 @@ func (a *App) setUse(name string, on bool) error {
 	return nil
 }
 
-// runsWhat says where a proxy's program comes from, in the config's words.
-func runsWhat(d config.Proxy) string {
+// programPath is the absolute path, in the container, of the file a proxy runs.
+func programPath(d config.Proxy) string {
 	if d.SystemBinary != "" {
 		return d.SystemBinary
 	}
-	return d.Package + ": " + d.Binary
+	return path.Join(proxy.PackagePrefix(d.Package), d.Binary)
 }

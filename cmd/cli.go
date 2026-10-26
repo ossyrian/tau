@@ -32,20 +32,19 @@ type App struct {
 	Env func(string) string
 	// Interactive is true when stdin and stdout are terminals.
 	Interactive bool
-	// Pretty is true when stdout is a terminal: output is drawn for people.
-	// Otherwise it is plain tab-separated records for scripts.
+	// Pretty is true when stdout is a terminal: output is coloured.
 	Pretty bool
-	// Width is the terminal width in columns; 0 means 80.
-	Width int
-	// NoColor drops colour from pretty output (the NO_COLOR convention).
+	// NoColor drops colour even on a terminal (the NO_COLOR convention).
 	NoColor bool
+	// Now is the clock for "3 hours ago"; nil means time.Now.
+	Now func() time.Time
 	// Catalog holds the shipped package definitions; may be nil.
 	Catalog fs.FS
 	// Docker runs `docker <args>` with dockerfile on stdin.
 	Docker func(args []string, dockerfile string) error
 	// Resolve shows the drift-resolution screen for c.
 	Resolve func(c *config.Config) error
-	// Sessions runs the `tau session` commands.
+	// Sessions runs the `tau sessions` commands.
 	Sessions *session.Manager
 	// Lifecycle runs start, stop and restart.
 	Lifecycle Lifecycle
@@ -60,6 +59,8 @@ type App struct {
 	// Select switches Core, Sessions and Lifecycle to the named profile. It
 	// runs before every command. Nil means they are already set.
 	Select func(name string) error
+	// profileName is the selected profile's name.
+	profileName string
 	// dir is the selected profile's directory; empty means the tau home.
 	dir string
 }
@@ -104,10 +105,11 @@ func (a *App) NewRootCmd() *cobra.Command {
 		a.lifecycleCmd("restart", "restart the container"),
 		a.skillsCmd(),
 		a.packagesCmd(),
-		a.workspaceCmd(),
-		a.profileCmd(),
-		a.proxyCmd(),
-		a.sessionCmd(),
+		a.workspacesCmd(),
+		a.profilesCmd(),
+		a.proxiesCmd(),
+		a.sessionsCmd(),
+		a.shellCmd(),
 		hidden(a.envCmd()),
 	)
 	return root
@@ -157,7 +159,7 @@ func (a *App) selectProfile(flag string) error {
 	if err != nil {
 		return err
 	}
-	a.dir = p.Dir
+	a.dir, a.profileName = p.Dir, p.Name
 	if a.Select == nil {
 		return nil
 	}
@@ -277,30 +279,6 @@ func driftNames(d config.Diff) []string {
 	return append(append([]string{}, d.RuntimeOnly...), d.Changed...)
 }
 
-func driftWords(kind string) string {
-	switch kind {
-	case "runtime-only":
-		return "added at runtime"
-	case "base-only":
-		return "only in config.yaml"
-	}
-	return kind
-}
-
-func driftStyle(kind string) lipgloss.Style {
-	if kind == "base-only" {
-		return theme.Dim
-	}
-	return theme.Warn
-}
-
-func kindStyle(kind string) lipgloss.Style {
-	if kind == "subagent" {
-		return theme.Info
-	}
-	return theme.OK
-}
-
 func (a *App) packagesCmd() *cobra.Command {
 	var exit bool
 	diff := &cobra.Command{Use: "diff", Short: "show how config.runtime.yaml differs from config.yaml", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
@@ -318,10 +296,7 @@ func (a *App) packagesCmd() *cobra.Command {
 				rows = append(rows, []string{g.kind, n})
 			}
 		}
-		a.out().Table([]render.Column{
-			{Title: "CHANGE", Show: driftWords, Style: driftStyle},
-			{Title: "PACKAGE"},
-		}, rows, "no drift")
+		a.profileTable([]render.Column{{Title: "CHANGE"}, {Title: "PACKAGE"}}, rows)
 		if exit && d.NeedsResolution() {
 			return errors.New("drift needs a decision")
 		}
@@ -339,22 +314,15 @@ func (a *App) packagesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			items := make([]render.Item, len(entries))
+			rows := make([][]string, len(entries))
 			for i, e := range entries {
-				what := "script"
+				install := "script"
 				if len(e.Apt) > 0 {
-					what = "apt: " + strings.Join(e.Apt, ", ")
+					install = "apt: " + strings.Join(e.Apt, ", ")
 				}
-				details := []render.Detail{{Label: "As", Value: e.As, Style: theme.Dim}}
-				if len(e.Needs) > 0 {
-					details = append(details, render.Detail{Label: "Needs", Value: strings.Join(e.Needs, ", "), Style: theme.Dim})
-				}
-				items[i] = render.Item{
-					Title: e.Name, Note: what, Details: details,
-					Fields: []string{e.Name, e.As, strings.Join(e.Needs, ",")},
-				}
+				rows[i] = []string{e.Name, e.As, strings.Join(e.Needs, ", "), install}
 			}
-			a.out().List("Packages", items, "no packages")
+			a.profileTable([]render.Column{{Title: "NAME"}, {Title: "AS"}, {Title: "NEEDS"}, {Title: "INSTALL"}}, rows)
 			return nil
 		}},
 		diff,
@@ -392,7 +360,7 @@ func (n *nameFlag) Set(v string) error {
 	return nil
 }
 
-func (a *App) sessionCmd() *cobra.Command {
+func (a *App) sessionsCmd() *cobra.Command {
 	needSessions := func() error {
 		if a.Sessions == nil {
 			return errors.New("sessions are not available")
@@ -421,7 +389,7 @@ func (a *App) sessionCmd() *cobra.Command {
 	}}
 	newCmd.Flags().Var(&name, "name", "name the session `NAME`")
 
-	return parent("session", "manage sessions",
+	return parent("sessions", "manage sessions",
 		newCmd,
 		&cobra.Command{Use: "list", Short: "list sessions", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 			if err := needSessions(); err != nil {
@@ -458,21 +426,26 @@ func (a *App) sessionList() error {
 	if err != nil {
 		return err
 	}
-	items := make([]render.Item, len(infos))
+	rows := make([][]string, len(infos))
 	for i, s := range infos {
-		items[i] = render.Item{
-			Title:  s.Name,
-			Fields: []string{s.Name, s.Kind, s.Created.Format(time.RFC3339), s.Active.Format(time.RFC3339), s.Profile},
-			Details: []render.Detail{
-				{Label: "Profile", Value: s.Profile, Style: theme.Dim},
-				{Label: "Type", Value: s.Kind, Style: kindStyle(s.Kind)},
-				{Label: "Created", Value: s.Created.Format(timeLayout), Style: theme.Dim},
-				{Label: "Last active", Value: s.Active.Format(timeLayout), Style: theme.Dim},
-			},
-		}
+		rows[i] = []string{s.Profile, s.Name, s.Kind, a.ago(s.Created), a.ago(s.Active)}
 	}
-	a.out().List("Sessions", items, "no active sessions")
+	a.out().Table([]render.Column{
+		{Title: "PROFILE"},
+		{Title: "NAME", Style: func(string) lipgloss.Style { return theme.Info }},
+		{Title: "TYPE"}, {Title: "CREATED"}, {Title: "LAST ACTIVE"},
+	}, rows)
 	return nil
+}
+
+// shellCmd opens a shell in the container, as the selected profile's user.
+func (a *App) shellCmd() *cobra.Command {
+	return &cobra.Command{Use: "shell", Short: "open a shell in the container", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
+		if a.Sessions == nil {
+			return errors.New("sessions are not available")
+		}
+		return a.Sessions.Shell()
+	}}
 }
 
 func (a *App) lifecycleCmd(name, short string) *cobra.Command {

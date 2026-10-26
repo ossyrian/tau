@@ -5,7 +5,7 @@ description: Delegate work to other pi sessions running in this tmux harness. Us
 
 # Subagent sessions
 
-A **subagent session** is another `pi` process running in its own named tmux session inside this same tmux server (the tau harness). It has its own context window, its own skills, and the same filesystem you have. Because it is its own tmux session (e.g. `sa-voice-65a45018`), it shows up in `tau session list` and the user can watch or kill it from their own shell. The `subagent-sessions` extension gives you tools to create them, send text to them, read their responses, and destroy them.
+A **subagent session** is another `pi` process running in its own named tmux session inside this same tmux server (the tau harness). It has its own context window, its own skills, and the same filesystem you have. Because it is its own tmux session (e.g. `sa-voice-65a45018`), it shows up in `tau sessions list` and the user can watch or kill it from their own shell. The `subagent-sessions` extension gives you tools to create them, send text to them, read their responses, and destroy them.
 
 The user sometimes calls this workflow "subagent". Existing skills (e.g. the voice skill) also use that term.
 
@@ -143,6 +143,6 @@ Keys: `h/l` (or `tab`/`shift+tab`) switch panels, `j/k` move within, `g/G` top/b
 - Subagents share your container: same filesystem, same skills, same extensions. They can read and edit files. Treat a subagent like another instance of yourself, not a sandbox.
 - Don't have a subagent spawn its own subagents by default; nested delegation is not set up and gets confusing fast.
 - Long tasks: the default wait timeout is 3 minutes. Raise `timeoutMs` for big jobs, or send with `wait: false` and poll with `subagent_wait`.
-- To watch a subagent live, the user can switch tmux sessions in their terminal (or see them via `tau session list`).
+- To watch a subagent live, the user can switch tmux sessions in their terminal (or see them via `tau sessions list`).
 - If a session is reported "gone", its tmux session died (or the harness restarted). Reconcile by calling `subagent_list`, then create a fresh one.
 - These tools only work inside the tau tmux harness. Outside tmux they return a clear error and do nothing.

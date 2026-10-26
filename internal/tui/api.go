@@ -10,6 +10,7 @@ import (
 	"github.com/ossyrian/tau/internal/proxy"
 	"github.com/ossyrian/tau/internal/session"
 	"github.com/ossyrian/tau/internal/skills"
+	"github.com/ossyrian/tau/internal/workspace"
 )
 
 // API is everything the interactive interface asks of tau. *core.Core
@@ -45,6 +46,10 @@ type API interface {
 	UnsetProxyVar(name, key string) (bool, error)
 	ReloadProxies() error
 	RefreshProxies(names []string) error
+
+	Workspaces() ([]workspace.Entry, error)
+	AddWorkspace(src, name string, live bool) (workspace.Result, error)
+	RemoveWorkspace(name string) (workspace.Entry, error)
 
 	LoadConfig() (*config.Config, error)
 	Build(noCache bool, out io.Writer) error

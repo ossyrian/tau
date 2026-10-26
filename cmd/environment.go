@@ -21,20 +21,9 @@ import (
 	"github.com/ossyrian/tau/internal/session"
 	"github.com/ossyrian/tau/internal/skills"
 	"github.com/ossyrian/tau/internal/tui"
-	"golang.org/x/term"
 )
 
 const containerName = "tau"
-
-// terminalWidth is the width of stdout in columns, or 0 when it is not a
-// terminal or the size is unknown.
-func terminalWidth() int {
-	w, _, err := term.GetSize(int(os.Stdout.Fd()))
-	if err != nil {
-		return 0
-	}
-	return w
-}
 
 func runResolve(c *config.Config) error {
 	final, err := tea.NewProgram(tui.NewResolve(c)).Run()

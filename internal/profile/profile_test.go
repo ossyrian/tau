@@ -88,7 +88,7 @@ func TestSelectNeedsTheProfileToExist(t *testing.T) {
 	if p, err := s.Select(""); err != nil || p.Name != Default {
 		t.Errorf("default: %v %v", p, err)
 	}
-	if _, err := s.Select("work"); err == nil || !strings.Contains(err.Error(), "tau profile new work") {
+	if _, err := s.Select("work"); err == nil || !strings.Contains(err.Error(), "tau profiles new work") {
 		t.Errorf("want a hint to create it, got %v", err)
 	}
 	if _, err := s.Create("work"); err != nil {

@@ -247,14 +247,26 @@ func TestBuildMissingDockerfileNamesTheRepoDir(t *testing.T) {
 	}
 }
 
-func TestPackagesLs(t *testing.T) {
+func TestPackagesListHasOneRowPerPackageWithItsAttributes(t *testing.T) {
 	h := newHarness(t, goodBase, "")
 	if code := h.app.Run([]string{"packages", "list"}); code != 0 {
 		t.Fatal(h.err)
 	}
-	if h.out.String() != "hello\troot\t\nlater\troot\thello\n" {
-		t.Errorf("stdout: %q", h.out)
-	}
+	assertHasWords(t, rowOf(t, h.out.String(), "hello"), "hello", "root", "script")
+	assertHasWords(t, rowOf(t, h.out.String(), "later"), "later", "root", "hello")
+}
+
+func TestPackagesListShowsAptPackagesAndTheUserTheyInstallAs(t *testing.T) {
+	h := newHarness(t, "packages:\n  pg: {apt: [x]}\n  tool: {script: s, as: user, needs: [pg]}\n", "")
+	h.app.Run([]string{"packages", "list"})
+	assertHasWords(t, rowOf(t, h.out.String(), "pg"), "apt:", "x")
+	assertHasWords(t, rowOf(t, h.out.String(), "tool"), "user")
+}
+
+func TestPackagesDiffNamesTheKindOfChange(t *testing.T) {
+	h := newHarness(t, "packages:\n  a: {script: s}\n", "packages:\n  a: {script: s}\n  r: {script: r}\n")
+	h.app.Run([]string{"packages", "diff"})
+	assertHasWords(t, rowOf(t, h.out.String(), "r"), "runtime-only")
 }
 
 func TestPackagesDiffShowsEachKindAndNeverChangesFiles(t *testing.T) {

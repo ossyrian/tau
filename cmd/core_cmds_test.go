@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -72,34 +71,33 @@ func coreHarness(t *testing.T, base, runtime string) (*harness, *fakeLife) {
 	return h, life
 }
 
-func TestStatusPrintsOneLinePerFact(t *testing.T) {
+func TestStatusReportsEachFact(t *testing.T) {
 	h, life := coreHarness(t, goodBase, "packages:\n  x: {script: echo x}\n")
 	life.st = container.State{Exists: true, Running: true, Env: map[string]string{}}
 	h.app.Core.Skill = fakeSk{drift: 1}
-	os.WriteFile(filepath.Join(h.home, ".env"), []byte("A=1\n"), 0o600)
 	if code := h.app.Run([]string{"status"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
-	want := "container=running\nimage=current\npackages=1\nskills=1\nprofile=default\n"
-	if h.out.String() != want {
-		t.Errorf("got:\n%s\nwant:\n%s", h.out, want)
+	row := rowOf(t, h.out.String(), "default")
+	assertHasWords(t, row, "running", "current")
+	if !strings.Contains(strings.Join(row, " "), "need a decision") || !strings.Contains(strings.Join(row, " "), "pending restart") {
+		t.Errorf("drift and pending skills not reported: %q", row)
 	}
 }
 
-func TestStatusWhenStoppedAndClean(t *testing.T) {
-	h, _ := coreHarness(t, goodBase, "")
-	h.app.Run([]string{"status"})
-	want := "container=not-running\nimage=current\npackages=0\nskills=0\nprofile=default\n"
-	if h.out.String() != want {
-		t.Errorf("got:\n%s", h.out)
-	}
-	_, life := coreHarness(t, goodBase, "")
-	life.st = container.State{Exists: true}
-	h2, life2 := coreHarness(t, goodBase, "")
-	life2.st = container.State{Exists: true}
-	h2.app.Run([]string{"status"})
-	if !strings.HasPrefix(h2.out.String(), "container=stopped\n") {
-		t.Errorf("got %q", h2.out)
+func TestStatusSaysWhetherTheContainerIsRunningStoppedOrMissing(t *testing.T) {
+	for _, c := range []struct {
+		st   container.State
+		want string
+	}{
+		{container.State{}, "not"},
+		{container.State{Exists: true}, "stopped"},
+		{container.State{Exists: true, Running: true, Env: map[string]string{}}, "running"},
+	} {
+		h, life := coreHarness(t, goodBase, "")
+		life.st = c.st
+		h.app.Run([]string{"status"})
+		assertHasWords(t, rowOf(t, h.out.String(), "default"), c.want)
 	}
 }
 
@@ -108,26 +106,22 @@ func TestStatusProblemsGoToStderrAndFailTheCommand(t *testing.T) {
 	if code := h.app.Run([]string{"status"}); code != 1 || !strings.Contains(h.err.String(), "config") {
 		t.Errorf("exit %d err %q", code, h.err)
 	}
-	if !strings.Contains(h.out.String(), "container=") {
+	if h.out.Len() == 0 {
 		t.Error("the rest of the status was not printed")
 	}
 }
 
-func TestSkillsLsShowsNameStatePath(t *testing.T) {
+func TestSkillsListShowsNameStateAndPath(t *testing.T) {
 	h, _ := coreHarness(t, goodBase, "")
 	h.app.Core.Skill = fakeSk{list: []skills.Skill{
 		{Name: "foo", Path: "/p/foo", Active: true, State: skills.Synced},
 		{Name: "barbaz", Path: "/p/barbaz", State: skills.Inactive},
 	}}
-	for _, verb := range []string{"list"} {
-		h.out.Reset()
-		if code := h.app.Run([]string{"skills", verb}); code != 0 {
-			t.Fatal(h.err)
-		}
-		if h.out.String() != "foo\tsynced\t/p/foo\nbarbaz\tinactive\t/p/barbaz\n" {
-			t.Errorf("%s:\n%s", verb, h.out)
-		}
+	if code := h.app.Run([]string{"skills", "list"}); code != 0 {
+		t.Fatal(h.err)
 	}
+	assertHasWords(t, rowOf(t, h.out.String(), "foo"), "synced", "/p/foo")
+	assertHasWords(t, rowOf(t, h.out.String(), "barbaz"), "inactive", "/p/barbaz")
 }
 
 func TestSkillsActivateAndDeactivate(t *testing.T) {
@@ -150,15 +144,11 @@ func TestSkillsPaths(t *testing.T) {
 	h.app.Core.Skill = fakeSk{log: &log, paths: []skills.PathInfo{
 		{Path: "~/.agents/skills", Found: true, Skills: 3}, {Path: "/gone"},
 	}}
-	for _, args := range [][]string{{"skills", "paths", "list"}} {
-		h.out.Reset()
-		if code := h.app.Run(args); code != 0 {
-			t.Fatal(h.err)
-		}
-		if h.out.String() != "~/.agents/skills\tfound\t3\n/gone\tmissing\t0\n" {
-			t.Errorf("%v:\n%s", args, h.out)
-		}
+	if code := h.app.Run([]string{"skills", "paths", "list"}); code != 0 {
+		t.Fatal(h.err)
 	}
+	assertHasWords(t, rowOf(t, h.out.String(), "~/.agents/skills"), "found", "3")
+	assertHasWords(t, rowOf(t, h.out.String(), "/gone"), "missing", "0")
 	h.out.Reset()
 	h.app.Run([]string{"skills", "paths", "add", "/x"})
 	h.app.Run([]string{"skills", "paths", "rm", "/y"})
@@ -199,17 +189,15 @@ func TestEnvCommands(t *testing.T) {
 	}
 	h.out.Reset()
 	h.app.Run([]string{"env", "list"})
-	if h.out.String() != "TOKEN=••••••••1234\nPLAIN=•••••\nEQ=•••\n" && h.out.String() != "TOKEN=••••••••1234\nPLAIN=•\nEQ=•\n" {
-		// values are masked down to their last four characters
-		if !strings.HasPrefix(h.out.String(), "TOKEN=••••••••1234\nPLAIN=") || strings.Contains(h.out.String(), "hello") {
-			t.Errorf("list:\n%s", h.out)
-		}
+	assertHasWords(t, rowOf(t, h.out.String(), "TOKEN"), "••••••••1234")
+	if strings.Contains(h.out.String(), "hello") || strings.Contains(h.out.String(), "abcdefgh") {
+		t.Errorf("list shows a secret:\n%s", h.out)
 	}
 	h.out.Reset()
 	h.app.Run([]string{"env", "list", "--show"})
-	if h.out.String() != "TOKEN=abcdefgh1234\nPLAIN=hello\nEQ=a=b\n" {
-		t.Errorf("show:\n%s", h.out)
-	}
+	assertHasWords(t, rowOf(t, h.out.String(), "TOKEN"), "abcdefgh1234")
+	assertHasWords(t, rowOf(t, h.out.String(), "PLAIN"), "hello")
+	assertHasWords(t, rowOf(t, h.out.String(), "EQ"), "a=b")
 	h.out.Reset()
 	if code := h.app.Run([]string{"env", "unset", "PLAIN"}); code != 0 || h.out.String() != "PLAIN\n" {
 		t.Errorf("exit %d out %q", code, h.out)
@@ -305,7 +293,7 @@ var _ = session.Info{}
 func TestEnvSetWarnsOnACredentialNameOnly(t *testing.T) {
 	h, _ := coreHarness(t, goodBase, "")
 	h.app.Run([]string{"env", "set", "API_TOKEN", "x"})
-	if !strings.Contains(h.err.String(), "tau proxy env set") {
+	if !strings.Contains(h.err.String(), "tau proxies env set") {
 		t.Errorf("no warning: %q", h.err)
 	}
 	h.err.Reset()

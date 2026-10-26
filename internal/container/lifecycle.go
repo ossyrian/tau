@@ -48,7 +48,7 @@ type Lifecycle struct {
 	Tracked func(dir string) ([]string, error)
 	// After runs once the container is up: it starts the proxy servers. A
 	// failure is reported but the container stays, because it is usable
-	// without proxies and `tau proxy reload` retries.
+	// without proxies and `tau proxies reload` retries.
 	After func() error
 	// Members, when set, lists the profiles at each start, so a profile added
 	// since tau began is included. It replaces Spec.Profiles.
@@ -109,7 +109,7 @@ func (l *Lifecycle) create() error {
 	}
 	if l.After != nil {
 		if err := l.After(); err != nil {
-			return fmt.Errorf("container started, but the proxy servers did not: %w (tau proxy reload retries)", err)
+			return fmt.Errorf("container started, but the proxy servers did not: %w (tau proxies reload retries)", err)
 		}
 	}
 	return nil
