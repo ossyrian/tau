@@ -1,16 +1,10 @@
 # per-user config
 .env
-.gitconfig
-skills.conf
-zshrc
-vimrc
 
 # runtime state
 tools/md2html/node_modules/
-workspaces.conf
 
 # pre-1.0 live mounts; state now lives under ~/.tau
-scripts/
 workspace/
 
 # pi-config is mostly runtime state + user customization, but tau-standard

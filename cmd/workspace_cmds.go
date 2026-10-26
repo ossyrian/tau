@@ -17,7 +17,7 @@ func (a *App) note(format string, args ...any) {
 
 func (a *App) workspaceCmd() *cobra.Command {
 	var name string
-	var live, cd bool
+	var live bool
 	add := &cobra.Command{
 		Use: "add [DIR]", Short: "add a project to the workspace",
 		Args: cobra.MaximumNArgs(1),
@@ -34,14 +34,13 @@ func (a *App) workspaceCmd() *cobra.Command {
 				return err
 			}
 			a.reportAdd(res)
-			// stdout: the host path, for the shell wrappers that cd to it
+			// stdout: the host path only, so $(tau workspace add ...) works in scripts
 			fmt.Fprintln(a.Stdout, res.Entry.Host)
 			return nil
 		},
 	}
 	add.Flags().StringVar(&name, "name", "", "name the entry `NAME` (default: the directory's name)")
 	add.Flags().BoolVar(&live, "live", false, "mount the real directory: the agent edits your files")
-	add.Flags().BoolVar(&cd, "cd", false, "change this shell to the directory (needs tau.fish or tau.bash)")
 
 	ls := &cobra.Command{Use: "list", Short: "list workspace projects", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 		if a.Core == nil {

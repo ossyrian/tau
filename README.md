@@ -1,5 +1,7 @@
 # Tau
 
+(This project is meant to be an exercise in isolating sensitive information from an agent at the harness level. It is a work-in-progress; I don't (yet) claim a full hardened security model in this project.)
+
 Tau runs the [Pi](https://pi.dev) coding agent in a Docker container. It is a Go
 binary with a CLI (`tau`) and a terminal UI (`tau -i`). Pi does the agent work. Tau
 builds the container, mounts your files into it, and keeps credentials out of the
@@ -30,6 +32,7 @@ Requirements: Docker with BuildKit, Go to build the binary, rsync for workspaces
 
 ```bash
 make                  # builds ./tau
+cp -r example/. ~/.tau/   # a starting config; fill in ~/.tau/secrets/*.env
 tau build             # build the image from ~/.tau/config.yaml
 tau start             # create the container
 tau session new       # start Pi in tmux; detach with Ctrl-b d
@@ -49,8 +52,8 @@ Run `tau -h` for the other commands:
 | `proxy` | list, allow, disallow, refresh and reload proxies; set their variables |
 | `env` | set the profile's environment variables |
 
-`tau.bash` and `tau.fish` make `tau workspace cd` and `add --cd` change your shell's
-directory. Source the one for your shell.
+`tau workspace cd NAME` and `tau workspace add` print the host path, so
+`cd "$(tau workspace cd NAME)"` changes your shell's directory.
 
 ## Files
 

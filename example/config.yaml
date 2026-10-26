@@ -1,0 +1,89 @@
+# Copy this directory to ~/.tau (cp -r example/. ~/.tau/), then edit.
+# Then: tau build && tau start
+
+# Installed in the image for everyone.
+packages:
+  git:
+    apt: [git]
+  utils:
+    apt: [jq, ripgrep, less, vim]
+  unzip:
+    apt: [unzip]
+  uv:
+    check: command -v uv
+    script: curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+  terraform:
+    needs: [unzip]
+    vars:
+      version: "1.9.8"
+    check: terraform version
+    script: |
+      arch="$(dpkg --print-architecture)"
+      curl -fsSL "https://releases.hashicorp.com/terraform/${version}/terraform_${version}_linux_${arch}.zip" -o /tmp/terraform.zip
+      unzip -q /tmp/terraform.zip -d /usr/local/bin
+      rm -f /tmp/terraform.zip
+
+# Credentialed commands. The agent types `gh`, `git` or `linear`; the real
+# program runs as another user, with credentials from ~/.tau/secrets/<proxy>.env.
+proxies:
+  # Hidden installs: only a proxy can run these. $PREFIX is the install directory.
+  packages:
+    gh-cli:
+      vars:
+        version: "2.103.2"
+      check: test -x "$PREFIX/bin/gh"
+      script: |
+        arch="$(dpkg --print-architecture)"
+        curl -fsSL "https://github.com/cli/cli/releases/download/v${version}/gh_${version}_linux_${arch}.tar.gz" | tar xz -C /tmp
+        mkdir -p "$PREFIX/bin"
+        mv "/tmp/gh_${version}_linux_${arch}/bin/gh" "$PREFIX/bin/gh"
+        rm -rf "/tmp/gh_${version}_linux_${arch}"
+    linear-cli:
+      vars:
+        version: "v2.6.0"
+      check: test -x "$PREFIX/bin/linear"
+      script: |
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends xz-utils
+        case "$(dpkg --print-architecture)" in
+          amd64) triple=x86_64-unknown-linux-gnu ;;
+          arm64) triple=aarch64-unknown-linux-gnu ;;
+        esac
+        mkdir -p "$PREFIX/bin"
+        curl -fsSL "https://github.com/schpet/linear-cli/releases/download/${version}/linear-${triple}.tar.xz" \
+          | tar xJ -C "$PREFIX/bin" --strip-components=1 "linear-${triple}/linear"
+
+  defs:
+    git:
+      system_binary: /usr/bin/git
+      agent_command: git
+      runs_in: agent_directory    # runs in the workspace, so it works only there
+      description: git, authenticated to GitHub
+      deny: [credential]
+    gh:
+      package: gh-cli
+      binary: bin/gh
+      agent_command: gh
+      runs_in: agent_directory
+      description: GitHub CLI
+      deny: [auth token, git-credential, --show-token]
+    linear:
+      package: linear-cli
+      binary: bin/linear
+      agent_command: linear
+      description: Linear CLI
+    # Credentials minted on the host each time the container starts.
+    # Only one proxy per agent_command can be active in a profile.
+    # aws-readonly:
+    #   system_binary: /usr/local/bin/aws
+    #   agent_command: aws
+    #   env_from: aws configure export-credentials --profile readonly --format env
+    #   deny: [configure export-credentials, --debug]
+
+  # Which proxies this profile may use.
+  active: [git, gh, linear]
+
+# Host skill directories to offer, and which of them the agent loads.
+skills:
+  paths:
+    - ~/.agents/skills
+  active: []

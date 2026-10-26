@@ -41,7 +41,7 @@ func (o Outcome) Text() (text, hint string) {
 type Lifecycle struct {
 	D    Docker
 	Spec Spec
-	// Repo is the tau checkout, the source of *.example files and pi-config.
+	// Repo is the tau checkout, the source of pi-config.
 	Repo   string
 	Stderr io.Writer // warnings
 	// Tracked lists the files git tracks under a directory.

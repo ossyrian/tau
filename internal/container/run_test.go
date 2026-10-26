@@ -161,11 +161,9 @@ func TestRunArgsWithNoPortsPublishesNothing(t *testing.T) {
 	}
 }
 
-func TestPrepareCreatesDirsAndSeedsDotfiles(t *testing.T) {
+func TestPrepareCreatesDirs(t *testing.T) {
 	s := baseSpec(t)
 	repo := t.TempDir()
-	write(t, filepath.Join(repo, "zshrc.example"), "zsh example\n")
-	write(t, filepath.Join(repo, "vimrc.example"), "vim example\n")
 	if err := Prepare(s, repo, noTracked); err != nil {
 		t.Fatal(err)
 	}
@@ -175,25 +173,6 @@ func TestPrepareCreatesDirsAndSeedsDotfiles(t *testing.T) {
 		if st, err := os.Stat(d); err != nil || !st.IsDir() {
 			t.Errorf("%s not created", d)
 		}
-	}
-	if b, _ := os.ReadFile(s.Profiles[0].Profile.Zshrc()); string(b) != "zsh example\n" {
-		t.Errorf("zshrc: %q", b)
-	}
-	if b, _ := os.ReadFile(s.Profiles[0].Profile.Vimrc()); string(b) != "vim example\n" {
-		t.Errorf("vimrc: %q", b)
-	}
-}
-
-func TestPrepareNeverOverwritesAUsersDotfile(t *testing.T) {
-	s := baseSpec(t)
-	repo := t.TempDir()
-	write(t, filepath.Join(repo, "zshrc.example"), "example\n")
-	write(t, s.Profiles[0].Profile.Zshrc(), "mine\n")
-	if err := Prepare(s, repo, noTracked); err != nil {
-		t.Fatal(err)
-	}
-	if b, _ := os.ReadFile(s.Profiles[0].Profile.Zshrc()); string(b) != "mine\n" {
-		t.Errorf("overwritten: %q", b)
 	}
 }
 

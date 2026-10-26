@@ -1,5 +1,4 @@
-# Build the tau binary. The output is ./tau because /usr/local/bin/tau,
-# tau.bash and tau.fish all point there. Override with `make OUT=path`.
+# Build the tau binary. Override the output with `make OUT=path`.
 OUT ?= tau
 
 .PHONY: build test vet

@@ -1,11 +1,8 @@
 .git/
 .env
-.gitconfig
 workspace/
 pi-config/
 *.md
-skills.conf
-workspaces.conf
 tau
 **/*_test.go
 tools/md2html/node_modules/

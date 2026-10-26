@@ -40,7 +40,7 @@ Always: `treehouse` (pooled worktrees; config at `~/.pi/agent/treehouse/config.t
 
 ## Host layout
 
-All per-user host state lives under `~/.tau/` (override with `TAU_HOME`): `.env`, `share/` (↔ container `~/share`), `scripts/` (→ `~/scripts`), `workspace/` (→ `/workspace`), `pi/` (→ `~/.pi`), `skills.conf`, `workspaces.conf`. The tau repo checkout itself holds only the image, the CLI, and tau-standard config — no user state.
+All per-user host state lives under `~/.tau/` (override with `TAU_HOME`): `.env`, `share/` (↔ container `~/share`), `scripts/` (→ `~/scripts`), `workspace/` (→ `/workspace`), `pi/` (→ `~/.pi`), `config.yaml`, `secrets/`. The tau repo checkout itself holds only the image, the CLI, and tau-standard config — no user state.
 
 ## Not standard (user customization)
 

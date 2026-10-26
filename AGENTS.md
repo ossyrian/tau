@@ -41,10 +41,10 @@ workspaces:
 ```
 
 ```bash
-tau workspace add [DIR] [--name NAME] [--live] [--cd]   # DIR defaults to the current directory
+tau workspace add [DIR] [--name NAME] [--live]   # DIR defaults to the current directory
 tau workspace list
 tau workspace rm NAME
-tau workspace cd [NAME]       # prints the directory on this machine (tau.fish / tau.bash cd to it)
+tau workspace cd [NAME]       # prints the directory on this machine: cd "$(tau workspace cd NAME)"
 ```
 
 Each entry is one of two kinds:
@@ -52,7 +52,7 @@ Each entry is one of two kinds:
 - **Copy** (the default). The directory is cloned into the workspace (a filesystem clone on macOS APFS: instant, almost no space). The agent edits the copy and your original is never changed. A copy shows in the running container at once. Adding the same directory again merges your changes in with rsync and keeps files only the copy has. `rm` deletes the copy and everything the agent changed in it.
 - **Live** (`--live`). Your real directory is bind-mounted at `/workspace/NAME`, so the agent can edit or delete your files. It is recorded under `workspaces.live` in `config.yaml`. Docker cannot change a running container's mounts, so `add --live` and `rm` of a live entry take effect on the next `tau restart` (running sessions are lost). `rm` never touches your directory.
 
-`add` and `cd` print only the host path on stdout. Messages go to stderr, so the shell wrappers and scripts can use the output.
+`add` and `cd` print only the host path on stdout. Messages go to stderr, so scripts can use the output.
 
 Which workspace a profile gets:
 
@@ -212,12 +212,12 @@ To edit an existing skill, modify its files in place. The agent picks up changes
 
 ### Sharing Skills with Pi
 
-If you use Pi outside tau, share tau skills by listing them in your main Pi `skills.conf`. They appear alongside your IDE skills in both environments.
+If you use Pi outside tau, share tau skills by listing the directory under `skills.paths` in `config.yaml`. They appear alongside your IDE skills in both environments.
 
 ### Available Skills
 
 Tau bundles no skills. `~/.pi/agent/skills/` holds skills the agent creates
-(persistent) plus any mounted via `skills.conf` — look there for what's
+(persistent) plus any mounted from `skills.paths` — look there for what's
 available.
 
 ## Scripts and Tools
@@ -246,7 +246,7 @@ Skills can include scripts in a `scripts/` subdirectory, documented in `SKILL.md
 
 ## Live Debug Sessions (impeccable, optional)
 
-Requires the [impeccable](https://impeccable.style) skill mounted via `skills.conf`; the
+Requires the [impeccable](https://impeccable.style) skill activated in `config.yaml`; the
 `live-bridge` extension is a no-op without it. `impeccable live` runs a helper in the container that the user's browser talks to
 (ports in `PI_PORTS`). The bundled `live-bridge` extension wakes the agent when a
 browser event is queued with no poll running. To close every live session:

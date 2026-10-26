@@ -85,8 +85,7 @@ func exists(path string) bool {
 	return err == nil && st.Mode().IsRegular()
 }
 
-// Prepare creates the host directories every profile mounts, seeds missing
-// dotfiles from the repo's *.example files, and refreshes the tau-standard Pi
+// Prepare creates the host directories every profile mounts and refreshes the tau-standard Pi
 // config of each profile. tracked lists the files under a directory that
 // belong to tau; only those are copied, and they overwrite the runtime copies.
 // Files the user owns are never touched.
@@ -106,32 +105,11 @@ func Prepare(s Spec, repo string, tracked func(dir string) ([]string, error)) er
 				return err
 			}
 		}
-		if err := seed(p.Zshrc(), filepath.Join(repo, "zshrc.example")); err != nil {
-			return err
-		}
-		if err := seed(p.Vimrc(), filepath.Join(repo, "vimrc.example")); err != nil {
-			return err
-		}
 		if err := seedPiConfig(p.PiDir(), filepath.Join(repo, "pi-config"), tracked); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// seed copies example to dst when dst is absent and example exists.
-func seed(dst, example string) error {
-	if _, err := os.Stat(dst); err == nil {
-		return nil
-	}
-	data, err := os.ReadFile(example)
-	if err != nil {
-		return nil // no example: leave dst absent
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o644)
 }
 
 func seedPiConfig(dst, src string, tracked func(string) ([]string, error)) error {
