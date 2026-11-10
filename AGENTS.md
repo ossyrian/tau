@@ -359,16 +359,16 @@ The image holds only what Tau needs: zsh, tmux, curl, socat, Node, Pi, treehouse
 tau start
 
 # Start a Pi session inside
-tau sessions new
+tau new
 
 # Detach from a session
 # Ctrl-b d
 
 # List running sessions
-tau sessions list
+tau list
 
 # Reattach to a session
-tau sessions attach <name>
+tau attach <name>
 
 # Add a project
 tau workspaces add ~/dev/myproject --name myproject

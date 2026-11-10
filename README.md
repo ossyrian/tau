@@ -35,9 +35,9 @@ make                  # builds ./tau
 cp -r example/. ~/.tau/   # a starting config; fill in ~/.tau/secrets/*.env
 tau build             # build the image from ~/.tau/config.yaml
 tau start             # create the container
-tau sessions new      # start Pi in tmux; detach with Ctrl-b d
-tau sessions list
-tau sessions attach NAME
+tau new               # start Pi in tmux; detach with Ctrl-b d
+tau list
+tau attach NAME       # `tau sessions ...` works too
 tau -i                # terminal UI
 ```
 
@@ -98,7 +98,7 @@ clipboard, so `tau` copies the image on your clipboard to `~/.tau/share/clipboar
 (`osascript` on macOS, `wl-paste` or `xclip` on Linux) just before Pi sees the key. An `xclip`
 stand-in in the image gives that file to Pi. The file is removed when you detach.
 
-This works only when you attach through `tau` (`tau sessions new`, `tau sessions attach`, or the
+This works only when you attach through `tau` (`tau new`, `tau attach`, or the
 terminal UI), not through a raw `docker exec` or `tmux attach`. A new image needs `tau build`
 and `tau restart`.
 

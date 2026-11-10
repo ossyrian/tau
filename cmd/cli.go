@@ -97,6 +97,8 @@ func (a *App) NewRootCmd() *cobra.Command {
 	root.Flags().BoolVarP(&interactive, "interactive", "i", false, "open the interactive interface")
 	root.PersistentFlags().StringVarP(&profileName, "profile", "p", "", "act on the profile `NAME` (default: $TAU_PROFILE, else the default profile)")
 
+	// The session commands are also top-level: `tau attach` is `tau sessions attach`.
+	root.AddCommand(a.sessionCommands()...)
 	root.AddCommand(
 		a.statusCmd(),
 		a.buildCmd(),
@@ -361,6 +363,12 @@ func (n *nameFlag) Set(v string) error {
 }
 
 func (a *App) sessionsCmd() *cobra.Command {
+	return parent("sessions", "manage sessions", a.sessionCommands()...)
+}
+
+// sessionCommands builds new, list, attach and kill. A cobra command has one
+// parent, so each call makes a fresh set.
+func (a *App) sessionCommands() []*cobra.Command {
 	needSessions := func() error {
 		if a.Sessions == nil {
 			return errors.New("sessions are not available")
@@ -389,7 +397,7 @@ func (a *App) sessionsCmd() *cobra.Command {
 	}}
 	newCmd.Flags().Var(&name, "name", "name the session `NAME`")
 
-	return parent("sessions", "manage sessions",
+	return []*cobra.Command{
 		newCmd,
 		&cobra.Command{Use: "list", Short: "list sessions", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 			if err := needSessions(); err != nil {
@@ -414,7 +422,7 @@ func (a *App) sessionsCmd() *cobra.Command {
 			a.out().Done("killed", n, "")
 			return nil
 		}},
-	)
+	}
 }
 
 func (a *App) sessionList() error {

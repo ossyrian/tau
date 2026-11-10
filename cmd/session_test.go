@@ -155,3 +155,34 @@ func TestShellWithoutManagerFailsCleanly(t *testing.T) {
 		t.Errorf("exit %d", code)
 	}
 }
+
+func TestSessionCommandsWorkWithoutTheSessionsWord(t *testing.T) {
+	for _, args := range [][]string{
+		{"new"}, {"new", "foo"}, {"new", "--name", "foo"}, {"list"}, {"attach", "ma"}, {"kill", "ma"},
+	} {
+		viaSessions := append([]string{"sessions"}, args...)
+		var got [2]string
+		for i, a := range [][]string{args, viaSessions} {
+			h := newHarness(t, "", "")
+			d := withSessions(h)
+			d.out["list-sessions"] = "main|1700000000|1700000000\n"
+			if code := h.app.Run(a); code != 0 {
+				t.Fatalf("%v: exit %d: %s", a, code, h.err)
+			}
+			got[i] = h.out.String() + h.err.String()
+		}
+		if got[0] != got[1] {
+			t.Errorf("%v: %q differs from the sessions form %q", args, got[0], got[1])
+		}
+	}
+}
+
+func TestSessionCommandsKeepTheirUsageChecksAtTheTopLevel(t *testing.T) {
+	for _, args := range [][]string{{"attach"}, {"attach", "a", "b"}, {"kill"}, {"new", "a", "b"}, {"list", "extra"}} {
+		h := newHarness(t, "", "")
+		withSessions(h)
+		if code := h.app.Run(args); code != 1 {
+			t.Errorf("%v: exit %d", args, code)
+		}
+	}
+}
