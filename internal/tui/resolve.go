@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/ossyrian/tau/internal/config"
+	"github.com/ossyrian/tau/internal/theme"
 )
 
 type item struct {
@@ -157,17 +158,17 @@ func (m Resolve) View() tea.View { return tea.NewView(m.Body()) }
 // Body is the screen's text, for embedding in another screen.
 func (m Resolve) Body() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("config.runtime.yaml differs from config.yaml") + "\n")
-	b.WriteString(dimStyle.Render("config.yaml is the source of truth. Decide what to do with each change.") + "\n\n")
+	b.WriteString(theme.Title.Render("config.runtime.yaml differs from config.yaml") + "\n")
+	b.WriteString(theme.Dim.Render("config.yaml is the source of truth. Decide what to do with each change.") + "\n\n")
 
 	for i, it := range m.items {
 		kind := "changed"
 		if it.runtimeOnly {
 			kind = "added at runtime"
 		}
-		line := fmt.Sprintf("%-24s %s", it.name, dimStyle.Render(kind))
+		line := fmt.Sprintf("%-24s %s", it.name, theme.Dim.Render(kind))
 		if i == m.cursor {
-			line = cursorStyle.Render("> ") + line
+			line = theme.Selected.Render("> ") + line
 		} else {
 			line = "  " + line
 		}
@@ -177,10 +178,10 @@ func (m Resolve) Body() string {
 		b.WriteString("\n" + m.detail(m.items[m.cursor]))
 	}
 	if base := m.cfg.Diff().BaseOnly; len(base) > 0 {
-		b.WriteString("\n" + dimStyle.Render("Also in config.yaml and not yet in the runtime copy (added on next build): "+strings.Join(base, ", ")) + "\n")
+		b.WriteString("\n" + theme.Dim.Render("Also in config.yaml and not yet in the runtime copy (added on next build): "+strings.Join(base, ", ")) + "\n")
 	}
 	if m.err != "" {
-		b.WriteString("\n" + errStyle.Render("error: "+m.err) + "\n")
+		b.WriteString("\n" + theme.Err.Render("error: "+m.err) + "\n")
 	}
 	b.WriteString("\n" + m.help() + "\n")
 	return b.String()
@@ -189,11 +190,11 @@ func (m Resolve) Body() string {
 func (m Resolve) detail(it item) string {
 	var b strings.Builder
 	if it.runtimeOnly {
-		b.WriteString(titleStyle.Render("runtime") + "\n" + indent(m.cfg.Runtime.Packages[it.name].YAML()) + "\n")
+		b.WriteString(theme.Title.Render("runtime") + "\n" + indent(m.cfg.Runtime.Packages[it.name].YAML()) + "\n")
 		return b.String()
 	}
-	b.WriteString(titleStyle.Render("config.yaml") + "\n" + indent(m.cfg.Base.Packages[it.name].YAML()) + "\n")
-	b.WriteString(titleStyle.Render("runtime") + "\n" + indent(m.cfg.Runtime.Packages[it.name].YAML()) + "\n")
+	b.WriteString(theme.Title.Render("config.yaml") + "\n" + indent(m.cfg.Base.Packages[it.name].YAML()) + "\n")
+	b.WriteString(theme.Title.Render("runtime") + "\n" + indent(m.cfg.Runtime.Packages[it.name].YAML()) + "\n")
 	return b.String()
 }
 
@@ -203,9 +204,9 @@ func (m Resolve) help() string {
 	}
 	quit := "   q quit"
 	if m.items[m.cursor].runtimeOnly {
-		return dimStyle.Render("a add to config.yaml   r discard   ↑/↓ move" + quit)
+		return theme.Dim.Render("a add to config.yaml   r discard   ↑/↓ move" + quit)
 	}
-	return dimStyle.Render("a use the runtime version in config.yaml   r revert the runtime copy   ↑/↓ move" + quit)
+	return theme.Dim.Render("a use the runtime version in config.yaml   r revert the runtime copy   ↑/↓ move" + quit)
 }
 
 func indent(s string) string {

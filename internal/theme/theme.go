@@ -15,9 +15,7 @@ var (
 	Err    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
 	Info   = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // cyan
 
-	Selected  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
-	Border    = lipgloss.NewStyle().Faint(true)
-	Tab       = lipgloss.NewStyle().Faint(true)
-	ActiveTab = lipgloss.NewStyle().Bold(true).Underline(true)
-	Key       = lipgloss.NewStyle().Bold(true)
+	Selected = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("2"))
+	Border   = lipgloss.NewStyle().Faint(true)
+	Key      = lipgloss.NewStyle().Bold(true)
 )
