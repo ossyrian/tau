@@ -65,10 +65,6 @@ export function tmuxSessionName(): string {
 	return tmux(["display", "-p", "#{session_name}"]);
 }
 
-export function paneExists(paneId: string): boolean {
-	return tmuxOk(["display", "-t", paneId, "-p", "#{pane_id}"]);
-}
-
 /** True if a tmux session with the given name exists. */
 export function sessionExists(name: string): boolean {
 	return tmuxOk(["has-session", "-t", name]);

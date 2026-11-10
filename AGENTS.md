@@ -151,7 +151,7 @@ tau            # with -i / on a terminal: the interactive interface
 | `/workspace/` | ✅ Yes | Project copies and live mounts (host `~/.tau/workspace`) |
 | `~/scripts/` | ✅ Yes | Shell scripts (host `~/.tau/scripts`) |
 | `~/share/` | ✅ Yes | File dropbox to the host (host `~/.tau/share`) — the way to hand files back |
-| `~/.treehouse/` | ✅ Yes | Treehouse worktree pools (host `~/.tau/treehouse`, `PI_TREEHOUSE`) |
+| `~/.treehouse/` | ✅ Yes | Treehouse worktree pools (host `~/.tau/treehouse`) |
 | `/tmp/`, `/home/pi` (rest) | ❌ No | Lost on restart |
 
 All host-side state lives under `~/.tau/` on the user's machine (`~/.tau/pi`,

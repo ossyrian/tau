@@ -17,7 +17,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { STATE_DIR, ensureStateDir, genId } from "./state.ts";
 
-export type BeaconEventType =
+type BeaconEventType =
 	| "ready"
 	| "busy"
 	| "settled"

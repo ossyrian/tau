@@ -16,7 +16,7 @@ import { sessionExists, tmux } from "./tmux.ts";
 
 export const REGISTRY_FILE = path.join(STATE_DIR, "registry.json");
 
-export type SubagentStatus = "starting" | "idle" | "busy" | "dead";
+type SubagentStatus = "starting" | "idle" | "busy" | "dead";
 
 export interface SubagentRecord {
 	id: string;
@@ -35,7 +35,7 @@ export interface SubagentRecord {
 	status: SubagentStatus;
 }
 
-export function loadRegistry(): SubagentRecord[] {
+function loadRegistry(): SubagentRecord[] {
 	try {
 		const raw = fs.readFileSync(REGISTRY_FILE, "utf8");
 		const data = JSON.parse(raw);

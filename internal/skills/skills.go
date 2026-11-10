@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/ossyrian/tau/internal/config"
-	"github.com/sahilm/fuzzy"
 )
 
 // DestFor is the container directory that holds the mounted skills of the
@@ -433,33 +432,4 @@ func (s *Store) indexOfPath(paths []string, p string) int {
 		}
 	}
 	return -1
-}
-
-// Filter returns the skills whose name or path fuzzy-matches query. Skills
-// whose name matches come first, best match first; skills that match only by
-// path follow. A path is long, so a short query would otherwise match scattered
-// letters in it and outrank the skill named for the query. An empty query
-// returns the list unchanged.
-func Filter(list []Skill, query string) []Skill {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return list
-	}
-	byName := make([]string, len(list))
-	byPath := make([]string, len(list))
-	for i, k := range list {
-		byName[i], byPath[i] = k.Name, k.Path
-	}
-	var out []Skill
-	named := map[int]bool{}
-	for _, m := range fuzzy.Find(query, byName) {
-		named[m.Index] = true
-		out = append(out, list[m.Index])
-	}
-	for _, m := range fuzzy.Find(query, byPath) {
-		if !named[m.Index] {
-			out = append(out, list[m.Index])
-		}
-	}
-	return out
 }

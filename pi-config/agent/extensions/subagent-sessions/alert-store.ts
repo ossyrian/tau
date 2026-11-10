@@ -30,10 +30,6 @@ export function getAlerts(): AlertPattern[] {
 	return [...alerts.values()];
 }
 
-export function getAlert(id: string): AlertPattern | undefined {
-	return alerts.get(id);
-}
-
 export function loadAlerts(): void {
 	alerts.clear();
 	try {
@@ -54,7 +50,7 @@ export function saveAlerts(): void {
 	fs.writeFileSync(ALERTS_FILE, JSON.stringify([...alerts.values()], null, 2), { encoding: "utf8" });
 }
 
-export interface AddAlertInput {
+interface AddAlertInput {
 	pattern: string;
 	flags?: string;
 	label?: string;

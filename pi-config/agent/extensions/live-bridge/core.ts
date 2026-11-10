@@ -11,14 +11,14 @@ import * as path from "node:path";
 
 export const IMPECCABLE = path.join(os.homedir(), ".pi/agent/skills/impeccable/scripts/impeccable");
 
-export interface LiveServer {
+interface LiveServer {
 	pid: number;
 	/** Project root: the helper's working directory. */
 	root: string;
 	port?: number;
 }
 
-export interface LiveStatus {
+interface LiveStatus {
 	connectedClients: number;
 	agentPolling: boolean;
 	pendingEvents: unknown[];

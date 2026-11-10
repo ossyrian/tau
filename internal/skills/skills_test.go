@@ -400,28 +400,6 @@ func TestMountsRefuseUnsafeNames(t *testing.T) {
 	}
 }
 
-func TestFilterMatchesNameOrPathFuzzily(t *testing.T) {
-	l := []Skill{
-		{Name: "python-testing", Path: "/h/house/02-python-testing"},
-		{Name: "voice", Path: "/h/agents/voice"},
-		{Name: "prune", Path: "/h/agents/prune"},
-	}
-	for query, want := range map[string][]string{
-		"":         {"python-testing", "voice", "prune"},
-		"   ":      {"python-testing", "voice", "prune"},
-		"voi":      {"voice"},
-		"pytst":    {"python-testing"},
-		"house":    {"python-testing"},
-		"agents":   {"voice", "prune"},
-		"zzzz":     nil,
-		"AGENTS/V": {"voice"},
-	} {
-		if got := names(Filter(l, query)); !reflect.DeepEqual(got, want) {
-			t.Errorf("%q: got %v want %v", query, got, want)
-		}
-	}
-}
-
 func TestListSkipsDirectoriesWithUnsafeNames(t *testing.T) {
 	// The name becomes a docker mount destination, so it must be one safe path part.
 	e := newEnv(t)
@@ -448,19 +426,6 @@ func TestActivateRefusesTheSameDirectoryUnderAnotherName(t *testing.T) {
 	}
 	if got := e.saved(t).Active; len(got) != 1 {
 		t.Errorf("saved %v", got)
-	}
-}
-
-func TestFilterRanksNameMatchesBeforePathOnlyMatches(t *testing.T) {
-	// "ga" is scattered through a long path, but only gamma is named for it.
-	l := []Skill{
-		{Name: "triage-linear-ticket", Path: "/Users/x/.agents/skills/triage-linear-ticket"},
-		{Name: "alpha", Path: "/tmp/Cgvc/pool/alpha"},
-		{Name: "gamma", Path: "/tmp/pool/gamma"},
-	}
-	got := names(Filter(l, "ga"))
-	if len(got) == 0 || got[0] != "gamma" {
-		t.Errorf("the skill named for the query should come first: %v", got)
 	}
 }
 
