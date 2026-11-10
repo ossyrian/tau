@@ -1,6 +1,7 @@
 package tui
 
 import (
+	bkey "charm.land/bubbles/v2/key"
 	"image/color"
 
 	"charm.land/bubbles/v2/help"
@@ -73,7 +74,14 @@ func newNav() list.Model {
 	l.SetShowFilter(false)
 	l.SetFilteringEnabled(false)
 	l.SetShowPagination(false)
-	l.DisableQuitKeybindings()
+	// Only the cursor keys: h and l move between the menu and the main area,
+	// and the paging keys would collide with section commands.
+	l.KeyMap = list.KeyMap{
+		CursorUp:   bkey.NewBinding(bkey.WithKeys("up", "k")),
+		CursorDown: bkey.NewBinding(bkey.WithKeys("down", "j")),
+		GoToStart:  bkey.NewBinding(bkey.WithKeys("home", "g")),
+		GoToEnd:    bkey.NewBinding(bkey.WithKeys("end", "G")),
+	}
 	return l
 }
 

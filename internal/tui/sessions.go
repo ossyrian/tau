@@ -47,6 +47,8 @@ func newSessions(api API) section {
 
 func (s *sessions) Name() string    { return "sessions" }
 func (s *sessions) Capturing() bool { return s.naming || s.m.Capturing() }
+func (s *sessions) Panes() int      { return s.m.Panes() }
+func (s *sessions) Focus(pane int)  { s.m.Focus(pane) }
 func (s *sessions) Keys() []bkey.Binding {
 	if s.naming {
 		return []bkey.Binding{binding("enter", "enter", "create"), binding("esc", "esc", "cancel")}
@@ -55,7 +57,7 @@ func (s *sessions) Keys() []bkey.Binding {
 	if s.m.Capturing() {
 		return keys
 	}
-	return append([]bkey.Binding{binding("enter", "enter", "attach"), binding("n", "n", "new"), binding("k", "k", "kill")}, keys...)
+	return append([]bkey.Binding{binding("enter", "enter", "attach"), binding("n", "n", "new"), binding("d", "d", "kill")}, keys...)
 }
 
 func (s *sessions) load() tea.Cmd {
@@ -130,7 +132,7 @@ func (s *sessions) browse(msg tea.KeyPressMsg) tea.Cmd {
 		s.naming = true
 		s.input.SetValue("")
 		return s.input.Focus()
-	case "k":
+	case "d":
 		in, ok := s.selected()
 		if !ok {
 			return nil
@@ -184,18 +186,18 @@ func (s *sessions) attach(profile, name string) tea.Cmd {
 
 func (s *sessions) View(w, h int) string {
 	if msg := stateMessage(s.err, s.loaded); msg != "" {
-		return messagePane("sessions", w, h, msg)
+		return messagePane("sessions", w, h, s.m.on(0), msg)
 	}
 	if s.naming {
 		top := 3
-		return column(pane("new session", w, top, true, s.input.View()), s.panes(w, h-top))
+		return column(pane("new session", w, top, s.m.on(0), s.input.View()), s.panes(w, h-top))
 	}
 	return s.panes(w, h)
 }
 
 func (s *sessions) panes(w, h int) string {
 	if len(s.infos) == 0 {
-		return messagePane("sessions", w, h, "no sessions yet — press n to start one")
+		return messagePane("sessions", w, h, s.m.on(0), "no sessions yet — press n to start one")
 	}
 	title, body := "screen", ""
 	if in, ok := s.selected(); ok {

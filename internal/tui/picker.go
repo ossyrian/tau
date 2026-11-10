@@ -81,6 +81,9 @@ func (p *picker) Filtering() bool { return p.typing || p.filter.Value() != "" }
 // Query is the text being matched.
 func (p *picker) Query() string { return p.filter.Value() }
 
+// Total is how many rows there are before the filter.
+func (p *picker) Total() int { return len(p.all) }
+
 // Len is how many rows pass the filter.
 func (p *picker) Len() int { return len(p.shown) }
 

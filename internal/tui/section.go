@@ -16,6 +16,12 @@ type section interface {
 	// View draws the section in exactly w×h cells. A section is one pane, or
 	// a list pane above a detail pane.
 	View(w, h int) string
+	// Panes is how many panes the section shows now: one, or a list above a
+	// detail. Tab steps through them.
+	Panes() int
+	// Focus gives the keyboard to one of the panes, or to none (-1) while the
+	// menu has it. The borders and the key routing follow.
+	Focus(pane int)
 	// Keys lists the bindings shown in the help line.
 	Keys() []bkey.Binding
 	// Capturing is true while a text input has the keyboard, so the root

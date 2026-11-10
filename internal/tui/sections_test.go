@@ -139,7 +139,7 @@ func TestSkillsShowTheSelectedSkillsMarkdownInAScrollableViewport(t *testing.T) 
 	if strings.Contains(screen(m), "THE-END") {
 		t.Fatal("the whole file is shown; there is nothing to scroll")
 	}
-	send(t, m, "pgdown", "pgdown", "pgdown", "pgdown", "pgdown", "pgdown")
+	send(t, m, "tab", "pgdown", "pgdown", "pgdown", "pgdown", "pgdown", "pgdown")
 	if !strings.Contains(screen(m), "THE-END") {
 		t.Errorf("paging down did not reach the end:\n%s", screen(m))
 	}

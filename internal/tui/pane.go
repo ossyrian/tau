@@ -29,6 +29,17 @@ func pane(title string, w, h int, active bool, body string) string {
 	return lipgloss.NewCompositor(lipgloss.NewLayer(box).AddLayers(over)).Render()
 }
 
+// focus says which of a section's panes has the keyboard: 0 the first (the
+// list), 1 the second (the detail), -1 neither because the menu has it. A
+// section embeds it, or hands Focus on to the masters it draws.
+type focus int
+
+// Focus is set by the root whenever the focused pane changes.
+func (f *focus) Focus(pane int) { *f = focus(pane) }
+
+// on reports whether pane has the keyboard.
+func (f focus) on(pane int) bool { return int(f) == pane }
+
 // inner is the room inside a pane of w×h cells.
 func inner(w, h int) (int, int) { return max(w-2, 1), max(h-2, 1) }
 
@@ -74,9 +85,9 @@ func stateMessage(err error, loaded bool) string {
 }
 
 // messagePane is a single pane holding text, for errors and empty states.
-func messagePane(title string, w, h int, text string) string {
+func messagePane(title string, w, h int, active bool, text string) string {
 	iw, _ := inner(w, h)
-	return pane(title, w, h, true, lipgloss.NewStyle().Width(iw).Foreground(theme.Dim.GetForeground()).Faint(true).Render(text))
+	return pane(title, w, h, active, lipgloss.NewStyle().Width(iw).Foreground(theme.Dim.GetForeground()).Faint(true).Render(text))
 }
 
 // varsPane draws a variable table; while a value is being typed, the input
@@ -85,7 +96,7 @@ func varsPane(title string, w, h int, e *varEditor) string {
 	if e.step == varBrowse {
 		iw, ih := inner(w, h)
 		e.pick.SetSize(iw, ih)
-		return pane(title, w, h, true, e.pick.View())
+		return pane(title, w, h, e.on(0), e.pick.View())
 	}
 	pt, pb := e.prompt()
 	top := min(5, h-4)

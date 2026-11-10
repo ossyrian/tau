@@ -25,6 +25,7 @@ const (
 // and each proxy's variables use it; they differ in what the owner does with a
 // change. Values are masked until the user reveals them.
 type varEditor struct {
+	focus
 	profile string
 	pick    *picker
 	vars    []envfile.Var

@@ -65,6 +65,16 @@ func newProxies(api API) section {
 }
 
 func (p *proxiesSection) Name() string { return "proxies" }
+
+func (p *proxiesSection) Panes() int {
+	if p.open != "" {
+		return 1
+	}
+	return p.m.Panes()
+}
+
+func (p *proxiesSection) Focus(pane int) { p.m.Focus(pane); p.vars.Focus(pane) }
+
 func (p *proxiesSection) Capturing() bool {
 	if p.open != "" {
 		return p.vars.Capturing()
@@ -267,13 +277,13 @@ func (p *proxiesSection) definition(name string) string {
 
 func (p *proxiesSection) View(w, h int) string {
 	if msg := stateMessage(p.err, p.loaded); msg != "" {
-		return messagePane("proxies", w, h, msg)
+		return messagePane("proxies", w, h, p.m.on(0), msg)
 	}
 	if p.open != "" {
 		return varsPane(p.open+" variables", w, h, p.vars)
 	}
 	if len(p.proxies.Defs) == 0 {
-		return messagePane("proxies", w, h, "no proxies defined — define one under proxies.defs in the default profile's config.yaml")
+		return messagePane("proxies", w, h, p.m.on(0), "no proxies defined — define one under proxies.defs in the default profile's config.yaml")
 	}
 	name, _ := p.selected()
 	return p.m.View(w, h, "proxies", name, p.definition(name))

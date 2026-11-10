@@ -6,9 +6,10 @@ import (
 )
 
 // master is the layout most sections share: a table above and, if the section
-// has one, a scrollable detail pane below. Tab-free focus: the table has the
-// cursor keys, and the detail pane scrolls with shift-arrows and the page keys.
+// has one, a scrollable detail pane below. Focus picks which of the two gets
+// the keys: the table moves its cursor, the detail scrolls.
 type master struct {
+	focus
 	pick *picker
 	det  *detail // nil for a section with a single pane
 }
@@ -24,35 +25,32 @@ func newMaster(withDetail bool, cols ...string) *master {
 // Capturing is true while the filter has the keyboard.
 func (m *master) Capturing() bool { return m.pick.Capturing() }
 
+// Panes is 2 while the detail pane is drawn, else 1. With no rows a section
+// shows a message in place of both.
+func (m *master) Panes() int {
+	if m.det == nil || m.pick.Total() == 0 {
+		return 1
+	}
+	return 2
+}
+
+// detailFocused is true when the detail pane has the keyboard and is drawn.
+func (m *master) detailFocused() bool { return m.on(1) && m.Panes() == 2 }
+
 // Keys are the bindings that every master adds to the help line.
 func (m *master) Keys() []bkey.Binding {
-	keys := m.pick.Keys()
-	if m.det != nil {
-		keys = append(keys, binding("pgdown", "pgup/pgdn", "scroll"))
+	if m.detailFocused() {
+		return []bkey.Binding{binding("j", "↑↓/jk", "scroll"), binding("pgdown", "pgup/pgdn", "page")}
 	}
-	return keys
+	return m.pick.Keys()
 }
 
-// Update gives a key to the detail pane when it scrolls, else to the table.
+// Update sends a key to the focused pane.
 func (m *master) Update(msg tea.Msg) tea.Cmd {
-	if k, ok := msg.(tea.KeyPressMsg); ok && m.det != nil && !m.pick.Capturing() {
-		switch k.String() {
-		case "pgup", "pgdown", "ctrl+u", "ctrl+d", "shift+up", "shift+down":
-			return m.det.Update(translate(k))
-		}
+	if m.detailFocused() {
+		return m.det.Update(msg)
 	}
 	return m.pick.Update(msg)
-}
-
-// translate maps the scroll keys onto the ones the viewport listens to.
-func translate(k tea.KeyPressMsg) tea.Msg {
-	switch k.String() {
-	case "shift+up":
-		return tea.KeyPressMsg{Code: tea.KeyUp}
-	case "shift+down":
-		return tea.KeyPressMsg{Code: tea.KeyDown}
-	}
-	return k
 }
 
 // View draws the panes in w×h cells. body is the detail text for the selected
@@ -61,7 +59,7 @@ func (m *master) View(w, h int, listTitle, detTitle, body string) string {
 	if m.det == nil {
 		iw, ih := inner(w, h)
 		m.pick.SetSize(iw, ih)
-		return pane(listTitle, w, h, true, m.pick.View())
+		return pane(listTitle, w, h, m.on(0), m.pick.View())
 	}
 	top, bottom := splitHeight(h)
 	iw, ih := inner(w, top)
@@ -73,7 +71,7 @@ func (m *master) View(w, h int, listTitle, detTitle, body string) string {
 		detTitle += "  " + s
 	}
 	return column(
-		pane(listTitle, w, top, true, m.pick.View()),
-		pane(detTitle, w, bottom, false, m.det.View()),
+		pane(listTitle, w, top, m.on(0), m.pick.View()),
+		pane(detTitle, w, bottom, m.on(1), m.det.View()),
 	)
 }

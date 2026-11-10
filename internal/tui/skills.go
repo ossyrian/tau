@@ -60,6 +60,10 @@ func newSkills(api API) section {
 
 func (s *skillsSection) Name() string { return "skills" }
 
+func (s *skillsSection) Panes() int { return s.current().Panes() }
+
+func (s *skillsSection) Focus(pane int) { s.list.Focus(pane); s.pathTab.Focus(pane) }
+
 func (s *skillsSection) current() *master {
 	if s.onPaths {
 		return s.pathTab
@@ -299,14 +303,14 @@ func skillText(k skills.Skill) string {
 
 func (s *skillsSection) View(w, h int) string {
 	if msg := stateMessage(s.err, s.loaded); msg != "" {
-		return messagePane("skills", w, h, msg)
+		return messagePane("skills", w, h, s.list.on(0), msg)
 	}
 	if s.mode != modeBrowse {
 		title := "add a skill path"
 		if s.mode == modeRenamePath {
 			title = "rename skill path"
 		}
-		return column(pane(title, w, 3, true, s.input.View()), s.body(w, h-3))
+		return column(pane(title, w, 3, s.list.on(0), s.input.View()), s.body(w, h-3))
 	}
 	return s.body(w, h)
 }
@@ -314,12 +318,12 @@ func (s *skillsSection) View(w, h int) string {
 func (s *skillsSection) body(w, h int) string {
 	if s.onPaths {
 		if len(s.paths) == 0 {
-			return messagePane("skill paths", w, h, "no skill paths — press a to add a directory")
+			return messagePane("skill paths", w, h, s.list.on(0), "no skill paths — press a to add a directory")
 		}
 		return s.pathTab.View(w, h, "skill paths", "", "")
 	}
 	if len(s.all) == 0 {
-		return messagePane("skills", w, h, "no skills found — press p, then a, to add a directory")
+		return messagePane("skills", w, h, s.list.on(0), "no skills found — press p, then a, to add a directory")
 	}
 	title, body := "SKILL.md", ""
 	if k, ok := s.selectedSkill(); ok {

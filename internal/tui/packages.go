@@ -50,6 +50,8 @@ func newPackages(api API) section {
 
 func (p *packages) Name() string    { return "packages" }
 func (p *packages) Capturing() bool { return p.m.Capturing() }
+func (p *packages) Panes() int      { return p.m.Panes() }
+func (p *packages) Focus(pane int)  { p.m.Focus(pane) }
 
 func (p *packages) Keys() []bkey.Binding {
 	keys := p.m.Keys()
@@ -61,7 +63,7 @@ func (p *packages) Keys() []bkey.Binding {
 		own = append([]bkey.Binding{binding("a", "a", "accept"), binding("r", "r", "reject")}, own...)
 	}
 	if p.log.Len() > 0 {
-		own = append(own, binding("l", "l", "build log"))
+		own = append(own, binding("o", "o", "build log"))
 	}
 	return append(own, keys...)
 }
@@ -161,7 +163,7 @@ func (p *packages) key(msg tea.KeyPressMsg) tea.Cmd {
 		return confirm("Rebuild the image from scratch without the cache? This is slow.", func() tea.Cmd {
 			return p.startBuild(true)
 		})
-	case "l":
+	case "o":
 		p.showLog = !p.showLog && p.log.Len() > 0
 		return nil
 	}
@@ -252,10 +254,10 @@ func (p *packages) detailText() (title, text string) {
 
 func (p *packages) View(w, h int) string {
 	if msg := stateMessage(p.err, p.loaded); msg != "" {
-		return messagePane("packages", w, h, msg)
+		return messagePane("packages", w, h, p.m.on(0), msg)
 	}
 	if len(p.entries)+len(p.added) == 0 {
-		return messagePane("packages", w, h, "no packages — add some to config.yaml")
+		return messagePane("packages", w, h, p.m.on(0), "no packages — add some to config.yaml")
 	}
 	title, text := p.detailText()
 	return p.m.View(w, h, "packages", title, text)

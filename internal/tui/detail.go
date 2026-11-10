@@ -1,6 +1,7 @@
 package tui
 
 import (
+	bkey "charm.land/bubbles/v2/key"
 	"strconv"
 
 	"charm.land/bubbles/v2/viewport"
@@ -17,6 +18,16 @@ type detail struct {
 func newDetail() *detail {
 	vp := viewport.New()
 	vp.SoftWrap = true
+	// Only keys that scroll vertically. h and l move between the menu and the
+	// main area, and the letters the sections use (d, b, f, u, space) stay theirs.
+	vp.KeyMap = viewport.KeyMap{
+		Up:           bkey.NewBinding(bkey.WithKeys("up", "k")),
+		Down:         bkey.NewBinding(bkey.WithKeys("down", "j")),
+		PageUp:       bkey.NewBinding(bkey.WithKeys("pgup")),
+		PageDown:     bkey.NewBinding(bkey.WithKeys("pgdown")),
+		HalfPageUp:   bkey.NewBinding(bkey.WithKeys("ctrl+u")),
+		HalfPageDown: bkey.NewBinding(bkey.WithKeys("ctrl+d")),
+	}
 	return &detail{vp: vp}
 }
 

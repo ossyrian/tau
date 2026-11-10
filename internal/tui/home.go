@@ -15,6 +15,7 @@ import (
 
 // home is a single pane: what needs attention, one row per fact.
 type home struct {
+	focus
 	api    API
 	status core.Status
 }
@@ -24,6 +25,7 @@ func newHome(api API) *home { return &home{api: api} }
 func (h *home) Name() string    { return "home" }
 func (h *home) Enter() tea.Cmd  { return nil }
 func (h *home) Capturing() bool { return false }
+func (h *home) Panes() int      { return 1 }
 func (h *home) Keys() []bkey.Binding {
 	return []bkey.Binding{binding("s", "s", "start"), binding("x", "x", "stop"), binding("r", "r", "restart")}
 }
@@ -110,5 +112,5 @@ func (h *home) View(w, ht int) string {
 		table.WithRows(rows), table.WithWidth(iw), table.WithHeight(ih),
 		table.WithStyles(table.Styles{Header: theme.Dim.Padding(0, 1), Cell: theme.Dim.Padding(0, 1).UnsetFaint(), Selected: theme.Selected}),
 	)
-	return pane("home", w, ht, true, t.View())
+	return pane("home", w, ht, h.on(0), t.View())
 }

@@ -30,6 +30,7 @@ type Root struct {
 	sections []section
 	nav      list.Model
 	active   int
+	focus    int // -1 the menu; 0 and up, a pane of the active section
 	w, h     int
 	status   core.Status
 
@@ -111,7 +112,29 @@ func (m *Root) syncNav() {
 	m.nav.Select(m.active)
 }
 
+// Update handles a message, then points every section's focus at the right pane.
 func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	next.syncFocus()
+	return next, cmd
+}
+
+// syncFocus keeps the focus on a pane that exists (a section can lose its
+// detail pane) and tells each section whether it has the keyboard.
+func (m *Root) syncFocus() {
+	if m.focus >= m.sections[m.active].Panes() {
+		m.focus = 0
+	}
+	for i, s := range m.sections {
+		if i == m.active {
+			s.Focus(m.focus)
+		} else {
+			s.Focus(-1)
+		}
+	}
+}
+
+func (m Root) update(msg tea.Msg) (Root, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -173,7 +196,7 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, m.forwardAll(msg)
 }
 
-func (m Root) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m Root) key(msg tea.KeyPressMsg) (Root, tea.Cmd) {
 	k := msg.String()
 	if k == "ctrl+c" {
 		return m, tea.Quit
@@ -195,17 +218,50 @@ func (m Root) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		return m, tea.Quit
 	case "tab":
-		return m, m.goTo(m.active + 1)
+		m.cycle(1)
+		return m, nil
 	case "shift+tab":
-		return m, m.goTo(m.active - 1)
+		m.cycle(-1)
+		return m, nil
 	}
 	if len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
 		if i := int(k[0] - '1'); i < len(m.sections) {
+			m.focus = 0
 			return m, m.goTo(i)
 		}
 		return m, nil
 	}
+	if m.focus < 0 {
+		return m.menuKey(msg)
+	}
+	if k == "h" || k == "left" {
+		m.focus = -1
+		return m, nil
+	}
 	return m, cur.Update(msg)
+}
+
+// cycle moves the focus d steps through the menu and the active section's
+// panes, in that order, and wraps.
+func (m *Root) cycle(d int) {
+	n := 1 + m.sections[m.active].Panes()
+	m.focus = ((m.focus+1+d)%n+n)%n - 1
+}
+
+// menuKey handles a key while the menu has the focus: the list's cursor keys
+// pick the section, and l, → or enter move into it.
+func (m Root) menuKey(msg tea.KeyPressMsg) (Root, tea.Cmd) {
+	switch msg.String() {
+	case "l", "right", "enter":
+		m.focus = 0
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.nav, cmd = m.nav.Update(msg)
+	if i := m.nav.Index(); i != m.active {
+		return m, m.goTo(i)
+	}
+	return m, cmd
 }
 
 // statusBody is the status pane's three lines.
@@ -242,10 +298,13 @@ func (m Root) helpLine() string {
 	case m.notice != "":
 		return theme.OK.Render(m.notice)
 	}
-	keys := append([]bkey.Binding{}, m.sections[m.active].Keys()...)
-	keys = append(keys,
-		bkey.NewBinding(bkey.WithKeys("tab"), bkey.WithHelp("tab", "section")),
-		bkey.NewBinding(bkey.WithKeys("q"), bkey.WithHelp("q", "quit")))
+	var keys []bkey.Binding
+	if m.focus < 0 {
+		keys = []bkey.Binding{binding("j", "↑↓/jk", "section"), binding("l", "→/l", "open")}
+	} else {
+		keys = append(keys, m.sections[m.active].Keys()...)
+	}
+	keys = append(keys, binding("tab", "tab", "pane"), binding("q", "q", "quit"))
 	return m.help.ShortHelpView(keys)
 }
 
@@ -269,7 +328,7 @@ func (m Root) View() tea.View {
 		m.nav.SetSize(iw, rows-statusHeight-2)
 		sidebar := column(
 			pane("status", left, statusHeight, false, m.statusBody()),
-			pane("tau", left, rows-statusHeight, false, m.nav.View()),
+			pane("tau", left, rows-statusHeight, m.focus < 0, m.nav.View()),
 		)
 		main := m.sections[m.active].View(right, rows)
 		// MaxWidth cuts the help line to the terminal; JoinVertical would

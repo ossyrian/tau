@@ -55,6 +55,8 @@ func newWorkspaces(api API) section {
 
 func (w *workspaces) Name() string    { return "workspaces" }
 func (w *workspaces) Capturing() bool { return w.step != wsBrowse || w.m.Capturing() }
+func (w *workspaces) Panes() int      { return w.m.Panes() }
+func (w *workspaces) Focus(pane int)  { w.m.Focus(pane) }
 
 func (w *workspaces) Keys() []bkey.Binding {
 	if w.step != wsBrowse {
@@ -238,7 +240,7 @@ func contents(dir string) string {
 
 func (w *workspaces) View(wd, ht int) string {
 	if msg := stateMessage(w.err, w.loaded); msg != "" {
-		return messagePane("workspaces", wd, ht, msg)
+		return messagePane("workspaces", wd, ht, w.m.on(0), msg)
 	}
 	if w.step != wsBrowse {
 		title := "directory to add"
@@ -248,14 +250,14 @@ func (w *workspaces) View(wd, ht int) string {
 		if w.live && w.step == wsDir {
 			title += " (live: the agent can edit it)"
 		}
-		return column(pane(title, wd, 3, true, w.input.View()), w.body(wd, ht-3))
+		return column(pane(title, wd, 3, w.m.on(0), w.input.View()), w.body(wd, ht-3))
 	}
 	return w.body(wd, ht)
 }
 
 func (w *workspaces) body(wd, ht int) string {
 	if len(w.entries) == 0 {
-		return messagePane("workspaces", wd, ht, "no workspaces — press a to add a copy of a project, A to mount one live")
+		return messagePane("workspaces", wd, ht, w.m.on(0), "no workspaces — press a to add a copy of a project, A to mount one live")
 	}
 	title, text := "files", ""
 	if e, ok := w.selected(); ok {

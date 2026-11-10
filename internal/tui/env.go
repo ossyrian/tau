@@ -46,6 +46,8 @@ func newEnv(api API) section {
 
 func (e *envSection) Name() string         { return "env" }
 func (e *envSection) Capturing() bool      { return e.vars.Capturing() }
+func (e *envSection) Panes() int           { return 1 }
+func (e *envSection) Focus(pane int)       { e.vars.Focus(pane) }
 func (e *envSection) Keys() []bkey.Binding { return e.vars.Keys() }
 
 func (e *envSection) Enter() tea.Cmd {
@@ -76,7 +78,7 @@ func (e *envSection) Update(msg tea.Msg) tea.Cmd {
 
 func (e *envSection) View(w, h int) string {
 	if msg := stateMessage(e.err, e.loaded); msg != "" {
-		return messagePane("env", w, h, msg)
+		return messagePane("env", w, h, e.vars.on(0), msg)
 	}
 	return varsPane("env", w, h, e.vars)
 }
