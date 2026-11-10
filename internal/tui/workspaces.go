@@ -53,10 +53,11 @@ func newWorkspaces(api API) section {
 	}
 }
 
-func (w *workspaces) Name() string    { return "workspaces" }
-func (w *workspaces) Capturing() bool { return w.step != wsBrowse || w.m.Capturing() }
-func (w *workspaces) Panes() int      { return w.m.Panes() }
-func (w *workspaces) Focus(pane int)  { w.m.Focus(pane) }
+func (w *workspaces) Name() string     { return "workspaces" }
+func (w *workspaces) Capturing() bool  { return w.step != wsBrowse || w.m.Capturing() }
+func (w *workspaces) Panes() int       { return w.m.Panes() }
+func (w *workspaces) PaneAt(y int) int { return w.m.PaneAt(y) }
+func (w *workspaces) Focus(pane int)   { w.m.Focus(pane) }
 
 func (w *workspaces) Keys() []bkey.Binding {
 	if w.step != wsBrowse {
@@ -112,6 +113,8 @@ func (w *workspaces) Update(msg tea.Msg) tea.Cmd {
 		w.setData(msg)
 	case reloadMsg:
 		return w.Enter()
+	case tea.MouseMsg:
+		return w.m.Update(msg)
 	case tea.KeyPressMsg:
 		switch {
 		case w.step != wsBrowse:

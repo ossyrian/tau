@@ -101,6 +101,21 @@ func (e *varEditor) selected() (envfile.Var, bool) {
 	return envfile.Var{}, false
 }
 
+// Mouse handles a click or a wheel turn on the table. A click on the selected
+// row does nothing here: the editor has no enter action to repeat.
+func (e *varEditor) Mouse(msg tea.MouseMsg) tea.Cmd {
+	at := msg.Mouse()
+	switch msg.(type) {
+	case tea.MouseWheelMsg:
+		return e.pick.Update(msg)
+	case tea.MouseClickMsg:
+		if at.Button == tea.MouseLeft && e.step == varBrowse { // else the prompt pane shifts the table
+			e.pick.Click(at.Y - 1) // -1: the pane's border
+		}
+	}
+	return nil
+}
+
 // Update handles a key.
 func (e *varEditor) Update(msg tea.KeyPressMsg) tea.Cmd {
 	switch e.step {

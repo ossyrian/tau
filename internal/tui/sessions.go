@@ -45,10 +45,11 @@ func newSessions(api API) section {
 	}
 }
 
-func (s *sessions) Name() string    { return "sessions" }
-func (s *sessions) Capturing() bool { return s.naming || s.m.Capturing() }
-func (s *sessions) Panes() int      { return s.m.Panes() }
-func (s *sessions) Focus(pane int)  { s.m.Focus(pane) }
+func (s *sessions) Name() string     { return "sessions" }
+func (s *sessions) Capturing() bool  { return s.naming || s.m.Capturing() }
+func (s *sessions) Panes() int       { return s.m.Panes() }
+func (s *sessions) PaneAt(y int) int { return s.m.PaneAt(y) }
+func (s *sessions) Focus(pane int)   { s.m.Focus(pane) }
 func (s *sessions) Keys() []bkey.Binding {
 	if s.naming {
 		return []bkey.Binding{binding("enter", "enter", "create"), binding("esc", "esc", "cancel")}
@@ -109,6 +110,8 @@ func (s *sessions) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	case reloadMsg, tickMsg:
 		return s.load()
+	case tea.MouseMsg:
+		return s.m.Update(msg)
 	case tea.KeyPressMsg:
 		if s.naming {
 			return s.typing(msg)

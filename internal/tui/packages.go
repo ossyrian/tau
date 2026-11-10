@@ -48,10 +48,11 @@ func newPackages(api API) section {
 	}
 }
 
-func (p *packages) Name() string    { return "packages" }
-func (p *packages) Capturing() bool { return p.m.Capturing() }
-func (p *packages) Panes() int      { return p.m.Panes() }
-func (p *packages) Focus(pane int)  { p.m.Focus(pane) }
+func (p *packages) Name() string     { return "packages" }
+func (p *packages) Capturing() bool  { return p.m.Capturing() }
+func (p *packages) Panes() int       { return p.m.Panes() }
+func (p *packages) PaneAt(y int) int { return p.m.PaneAt(y) }
+func (p *packages) Focus(pane int)   { p.m.Focus(pane) }
 
 func (p *packages) Keys() []bkey.Binding {
 	keys := p.m.Keys()
@@ -142,6 +143,8 @@ func (p *packages) Update(msg tea.Msg) tea.Cmd {
 		p.setData(msg)
 	case reloadMsg:
 		return p.Enter()
+	case tea.MouseMsg:
+		return p.m.Update(msg)
 	case tea.KeyPressMsg:
 		return p.key(msg)
 	}

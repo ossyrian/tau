@@ -1,6 +1,7 @@
 package tui
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"fmt"
 	"github.com/ossyrian/tau/internal/skills"
 	"strings"
@@ -162,5 +163,55 @@ func TestSkillsSearchMatchesTheNameAndNotTheStateOrPath(t *testing.T) {
 	send(t, m, "/", "p", "y", "enter")
 	if s := screen(m); !strings.Contains(s, "python-linting") || strings.Contains(s, "prune") {
 		t.Errorf("py matched the wrong rows:\n%s", s)
+	}
+}
+
+func TestClickSelectsTheRowDrawnOnThatLine(t *testing.T) {
+	p := newTestPicker(60, 8, "a", "b", "c", "d")
+	// line 0 is the header, so row "c" is on line 3
+	if again, ok := p.Click(3); !ok || again || selectedKey(p) != "c" {
+		t.Fatalf("click c: again %v ok %v selected %q", again, ok, selectedKey(p))
+	}
+	if again, ok := p.Click(3); !ok || !again {
+		t.Errorf("a second click on the selected row should say so: again %v ok %v", again, ok)
+	}
+	for _, y := range []int{0, 5, 40, -1} { // the header, below the last row, far off
+		if _, ok := p.Click(y); ok {
+			t.Errorf("line %d is not a row", y)
+		}
+	}
+	if selectedKey(p) != "c" {
+		t.Errorf("a miss moved the cursor to %q", selectedKey(p))
+	}
+}
+
+func TestClickFindsTheRightRowAfterTheTableHasScrolled(t *testing.T) {
+	keys := make([]string, 30)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("row-%02d", i)
+	}
+	p := newTestPicker(60, 6, keys...) // 5 body lines
+	for i := 0; i < 12; i++ {
+		p.Update(key("down"))
+	}
+	for line := 1; line <= 5; line++ {
+		if _, ok := p.Click(line); !ok {
+			t.Fatalf("line %d not a row", line)
+		}
+		// the row clicked is the one drawn on that line
+		body := strings.Split(p.table.View(), "\n")[line]
+		if !strings.Contains(body, selectedKey(p)) {
+			t.Errorf("line %d shows %q but selected %q", line, strings.TrimSpace(body), selectedKey(p))
+		}
+	}
+}
+
+func TestWheelMovesThePickersCursor(t *testing.T) {
+	p := newTestPicker(60, 8, "a", "b", "c")
+	p.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	p.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	p.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	if selectedKey(p) != "b" {
+		t.Errorf("selected %q", selectedKey(p))
 	}
 }

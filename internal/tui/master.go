@@ -12,6 +12,7 @@ type master struct {
 	focus
 	pick *picker
 	det  *detail // nil for a section with a single pane
+	h    int     // the height View last drew, to tell which pane a row belongs to
 }
 
 func newMaster(withDetail bool, cols ...string) *master {
@@ -34,6 +35,40 @@ func (m *master) Panes() int {
 	return 2
 }
 
+// PaneAt is the pane drawn y rows down: the list above the split, the detail below.
+func (m *master) PaneAt(y int) int {
+	if m.Panes() == 2 {
+		if top, _ := splitHeight(m.h); y >= top {
+			return 1
+		}
+	}
+	return 0
+}
+
+// enterKey is what clicking the selected row sends: the same as pressing enter.
+func enterKey() tea.Msg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
+
+// mouse handles a click or wheel turn at section-relative coordinates. The
+// wheel acts on the pane under the pointer, whichever has the focus. A click
+// selects a row; clicking the selected row again does what enter does.
+func (m *master) mouse(msg tea.MouseMsg) tea.Cmd {
+	at := msg.Mouse()
+	switch msg.(type) {
+	case tea.MouseWheelMsg:
+		if m.PaneAt(at.Y) == 1 {
+			return m.det.Update(msg)
+		}
+		return m.pick.Update(msg)
+	case tea.MouseClickMsg:
+		if at.Button == tea.MouseLeft && m.PaneAt(at.Y) == 0 {
+			if again, ok := m.pick.Click(at.Y - 1); ok && again { // -1: the pane's border
+				return enterKey
+			}
+		}
+	}
+	return nil
+}
+
 // detailFocused is true when the detail pane has the keyboard and is drawn.
 func (m *master) detailFocused() bool { return m.on(1) && m.Panes() == 2 }
 
@@ -47,6 +82,9 @@ func (m *master) Keys() []bkey.Binding {
 
 // Update sends a key to the focused pane.
 func (m *master) Update(msg tea.Msg) tea.Cmd {
+	if mm, ok := msg.(tea.MouseMsg); ok {
+		return m.mouse(mm)
+	}
 	if m.detailFocused() {
 		return m.det.Update(msg)
 	}
@@ -56,6 +94,7 @@ func (m *master) Update(msg tea.Msg) tea.Cmd {
 // View draws the panes in w×h cells. body is the detail text for the selected
 // row; section code passes it already highlighted.
 func (m *master) View(w, h int, listTitle, detTitle, body string) string {
+	m.h = h
 	if m.det == nil {
 		iw, ih := inner(w, h)
 		m.pick.SetSize(iw, ih)

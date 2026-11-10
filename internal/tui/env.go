@@ -47,6 +47,7 @@ func newEnv(api API) section {
 func (e *envSection) Name() string         { return "env" }
 func (e *envSection) Capturing() bool      { return e.vars.Capturing() }
 func (e *envSection) Panes() int           { return 1 }
+func (e *envSection) PaneAt(int) int       { return 0 }
 func (e *envSection) Focus(pane int)       { e.vars.Focus(pane) }
 func (e *envSection) Keys() []bkey.Binding { return e.vars.Keys() }
 
@@ -70,6 +71,8 @@ func (e *envSection) Update(msg tea.Msg) tea.Cmd {
 		e.vars.Set(msg.profile, msg.vars)
 	case reloadMsg:
 		return e.load()
+	case tea.MouseMsg:
+		return e.vars.Mouse(msg)
 	case tea.KeyPressMsg:
 		return e.vars.Update(msg)
 	}

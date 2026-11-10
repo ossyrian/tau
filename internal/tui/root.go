@@ -139,6 +139,9 @@ func (m Root) update(msg tea.Msg) (Root, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
 		m.help.SetWidth(msg.Width - 1)
+		left, _, rows := m.layout()
+		iw, _ := inner(left, rows)
+		m.nav.SetSize(iw, rows-statusHeight-2)
 		return m, nil
 
 	case statusMsg:
@@ -192,6 +195,9 @@ func (m Root) update(msg tea.Msg) (Root, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return m.key(msg)
+
+	case tea.MouseMsg:
+		return m.mouse(msg)
 	}
 	return m, m.forwardAll(msg)
 }
@@ -264,6 +270,73 @@ func (m Root) menuKey(msg tea.KeyPressMsg) (Root, tea.Cmd) {
 	return m, cmd
 }
 
+// mouse routes a click or wheel turn by where it lands: the menu, or the main
+// area. A click in the main area focuses the pane under it, then goes to the
+// section with coordinates relative to the section's top-left corner. A text
+// input or a confirmation owns the screen, so they ignore the mouse.
+func (m Root) mouse(msg tea.MouseMsg) (Root, tea.Cmd) {
+	if m.prompt != nil || m.sections[m.active].Capturing() || tooSmall(m.w, m.h) {
+		return m, nil
+	}
+	left, _, rows := m.layout()
+	at := msg.Mouse()
+	_, click := msg.(tea.MouseClickMsg)
+	if click && at.Button != tea.MouseLeft {
+		return m, nil
+	}
+	switch {
+	case at.Y >= rows: // the help line
+		return m, nil
+	case at.X >= left:
+		cur := m.sections[m.active]
+		if click {
+			if p := cur.PaneAt(at.Y); p < cur.Panes() {
+				m.focus = p
+			}
+		}
+		m.notice, m.noticeErr = "", false
+		return m, cur.Update(shifted(msg, -left, 0))
+	case at.Y < statusHeight: // the status pane has nothing to click
+		return m, nil
+	}
+	return m.menuMouse(msg, at.Y-statusHeight-1) // -1: the pane's border
+}
+
+// menuMouse handles a click or wheel turn on line y of the menu list.
+func (m Root) menuMouse(msg tea.MouseMsg, y int) (Root, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			return m, m.goTo(max(m.active-1, 0))
+		case tea.MouseWheelDown:
+			return m, m.goTo(min(m.active+1, len(m.sections)-1))
+		}
+	case tea.MouseClickMsg:
+		// The list may be paged: line 0 is item Index-Cursor.
+		if i := m.nav.Index() - m.nav.Cursor() + y; y >= 0 && i < len(m.sections) {
+			m.focus = 0
+			return m, m.goTo(i)
+		}
+	}
+	return m, nil
+}
+
+// shifted moves a mouse message's position by (dx, dy).
+func shifted(msg tea.MouseMsg, dx, dy int) tea.MouseMsg {
+	mm := msg.Mouse()
+	mm.X, mm.Y = mm.X+dx, mm.Y+dy
+	switch msg.(type) {
+	case tea.MouseClickMsg:
+		return tea.MouseClickMsg(mm)
+	case tea.MouseReleaseMsg:
+		return tea.MouseReleaseMsg(mm)
+	case tea.MouseWheelMsg:
+		return tea.MouseWheelMsg(mm)
+	}
+	return tea.MouseMotionMsg(mm)
+}
+
 // statusBody is the status pane's three lines.
 func (m Root) statusBody() string {
 	var state string
@@ -324,8 +397,6 @@ func (m Root) View() tea.View {
 		v = tea.NewView(lipgloss.NewStyle().Width(max(m.w, 1)).Render(msg))
 	} else {
 		left, right, rows := m.layout()
-		iw, _ := inner(left, rows)
-		m.nav.SetSize(iw, rows-statusHeight-2)
 		sidebar := column(
 			pane("status", left, statusHeight, false, m.statusBody()),
 			pane("tau", left, rows-statusHeight, m.focus < 0, m.nav.View()),
@@ -337,6 +408,7 @@ func (m Root) View() tea.View {
 		v = tea.NewView(column(row(sidebar, main), help))
 	}
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = "tau"
 	return v
 }

@@ -62,6 +62,8 @@ func (s *skillsSection) Name() string { return "skills" }
 
 func (s *skillsSection) Panes() int { return s.current().Panes() }
 
+func (s *skillsSection) PaneAt(y int) int { return s.current().PaneAt(y) }
+
 func (s *skillsSection) Focus(pane int) { s.list.Focus(pane); s.pathTab.Focus(pane) }
 
 func (s *skillsSection) current() *master {
@@ -151,6 +153,8 @@ func (s *skillsSection) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	case reloadMsg:
 		return s.Enter()
+	case tea.MouseMsg:
+		return s.current().Update(msg)
 	case tea.KeyPressMsg:
 		switch {
 		case s.mode != modeBrowse:

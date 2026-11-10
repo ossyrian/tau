@@ -26,6 +26,7 @@ func (h *home) Name() string    { return "home" }
 func (h *home) Enter() tea.Cmd  { return nil }
 func (h *home) Capturing() bool { return false }
 func (h *home) Panes() int      { return 1 }
+func (h *home) PaneAt(int) int  { return 0 }
 func (h *home) Keys() []bkey.Binding {
 	return []bkey.Binding{binding("s", "s", "start"), binding("x", "x", "stop"), binding("r", "r", "restart")}
 }

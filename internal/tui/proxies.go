@@ -75,6 +75,13 @@ func (p *proxiesSection) Panes() int {
 
 func (p *proxiesSection) Focus(pane int) { p.m.Focus(pane); p.vars.Focus(pane) }
 
+func (p *proxiesSection) PaneAt(y int) int {
+	if p.open != "" {
+		return 0
+	}
+	return p.m.PaneAt(y)
+}
+
 func (p *proxiesSection) Capturing() bool {
 	if p.open != "" {
 		return p.vars.Capturing()
@@ -175,6 +182,11 @@ func (p *proxiesSection) Update(msg tea.Msg) tea.Cmd {
 			return tea.Batch(p.load(), p.loadVars())
 		}
 		return p.load()
+	case tea.MouseMsg:
+		if p.open != "" {
+			return p.vars.Mouse(msg)
+		}
+		return p.m.Update(msg)
 	case tea.KeyPressMsg:
 		if p.open != "" {
 			return p.browseVars(msg)

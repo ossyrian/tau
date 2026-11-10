@@ -19,6 +19,9 @@ type section interface {
 	// Panes is how many panes the section shows now: one, or a list above a
 	// detail. Tab steps through them.
 	Panes() int
+	// PaneAt is the pane drawn y rows below the top of the section, so the
+	// root can focus the pane a click lands in.
+	PaneAt(y int) int
 	// Focus gives the keyboard to one of the panes, or to none (-1) while the
 	// menu has it. The borders and the key routing follow.
 	Focus(pane int)

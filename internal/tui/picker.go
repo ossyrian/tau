@@ -72,6 +72,41 @@ func newPicker(cols ...string) *picker {
 	return p
 }
 
+// selectedPrefix is the escape sequence that opens the selected row's style.
+// bubbles/table does not say which row is drawn on which line, but the selected
+// row is the one line that starts with this, and the rest follow from it.
+var selectedPrefix = strings.SplitN(theme.Selected.Render("\x00"), "\x00", 2)[0]
+
+// rowAt returns the index into the shown rows of the row drawn y lines below
+// the top of the picker (line 0 is the header).
+func (p *picker) rowAt(y int) (int, bool) {
+	lines := strings.Split(p.table.View(), "\n")[1:]
+	sel := slices.IndexFunc(lines, func(l string) bool { return strings.HasPrefix(l, selectedPrefix) })
+	line := y - 1
+	if sel < 0 || line < 0 || line >= len(lines) {
+		return 0, false
+	}
+	i := p.table.Cursor() + line - sel
+	return i, i >= 0 && i < len(p.shown)
+}
+
+// Click moves the cursor to the row y lines below the top and reports whether
+// that row was already selected.
+func (p *picker) Click(y int) (again, ok bool) {
+	i, ok := p.rowAt(y)
+	if !ok {
+		return false, false
+	}
+	d := i - p.table.Cursor()
+	switch {
+	case d > 0:
+		p.table.MoveDown(d)
+	case d < 0:
+		p.table.MoveUp(-d)
+	}
+	return d == 0, true
+}
+
 // Capturing is true while the filter has the keyboard.
 func (p *picker) Capturing() bool { return p.typing }
 
@@ -201,6 +236,15 @@ func sum(xs []int) int {
 
 // Update handles a key: it moves the cursor, or edits the filter.
 func (p *picker) Update(msg tea.Msg) tea.Cmd {
+	if w, ok := msg.(tea.MouseWheelMsg); ok {
+		switch w.Button {
+		case tea.MouseWheelUp:
+			p.table.MoveUp(1)
+		case tea.MouseWheelDown:
+			p.table.MoveDown(1)
+		}
+		return nil
+	}
 	k, isKey := msg.(tea.KeyPressMsg)
 	if !isKey {
 		return nil
