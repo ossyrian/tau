@@ -6,4 +6,3 @@ pi-config/
 tau
 **/*_test.go
 tools/md2html/node_modules/
-tools/annotate/

@@ -259,15 +259,6 @@ tau live stop     # stop all helpers, strip injected live.js, kill stray polls
 Inside pi: the `live_stop` tool (so you can tell the agent "close the debug
 sessions") or the `/live-stop` command. See the `tau-live-debug` skill.
 
-## Commenting on Reports
-
-```bash
-tau annotate reports/q3.html   # host: open a ~/share HTML file with a comment overlay
-```
-
-Comments on selected text or a section arrive as `[annotate] Feedback on ...` messages
-in a session. See the `tau-annotate` skill.
-
 ## Talking to Other Sessions
 
 Multiple Pi sessions run in the same tmux server.

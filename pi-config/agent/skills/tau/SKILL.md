@@ -17,7 +17,6 @@ Everything listed here ships with the tau repo and is present in every tau insta
 | `subagent-sessions` | Delegating work to other pi sessions in this tmux harness |
 | `index-maintenance` | Reading and maintaining tau's running indexes: the glossary, `~/scripts/INDEX.md`, and `/workspace/INDEX.md` |
 | `tau-slack` | Reading and sending Slack as the user with `slack api` (needs the `slack` CLI). Maps the Slack MCP tool names other skills use to CLI calls, and the rule to send messages as Markdown in `markdown_text` |
-| `tau-annotate` | Handling `[annotate]` messages: comments the user made in their browser on an HTML report in `~/share` (`tau annotate`) |
 | `tau-live-debug` | (needs the impeccable skill mounted) impeccable live mode (in-browser visual feedback) in the container: reachable ports, keeping a poll running, `live_stop` to close sessions |
 
 ## Extensions (`~/.pi/agent/extensions/`)

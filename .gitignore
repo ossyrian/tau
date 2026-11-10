@@ -26,7 +26,6 @@ pi-config/agent/skills/*
 !pi-config/agent/skills/review-local-code
 !pi-config/agent/skills/tau-share
 !pi-config/agent/skills/tau-live-debug
-!pi-config/agent/skills/tau-annotate
 !pi-config/agent/skills/tau-slack
 
 # tau-standard extensions (user-added ones — status lines etc. — stay ignored)
