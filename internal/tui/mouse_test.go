@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"github.com/ossyrian/tau/internal/envfile"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -175,5 +176,35 @@ func TestShiftedMovesThePositionAndKeepsTheMessageType(t *testing.T) {
 	}
 	if _, ok := shifted(wheel(1, 1, tea.MouseWheelUp).(tea.MouseMsg), 0, 0).(tea.MouseWheelMsg); !ok {
 		t.Error("a wheel turn changed type")
+	}
+}
+
+func TestClickingTheSelectedVariableAgainEditsIt(t *testing.T) {
+	f := newFake(t)
+	f.vars = []envfile.Var{{Key: "A", Value: "1"}, {Key: "B", Value: "2"}}
+	m := newRoot(t, f)
+	open(t, m, "env")
+	sec := m.sections[m.active].(*envSection)
+	m.View()
+	drive(t, m, click(mainX(m), 3)) // border, header, A, B → B
+	if sec.vars.step != varBrowse || sec.vars.pick.table.Cursor() != 1 {
+		t.Fatalf("first click: step %d cursor %d", sec.vars.step, sec.vars.pick.table.Cursor())
+	}
+	m.View()
+	drive(t, m, click(mainX(m), 3))
+	if sec.vars.step != varValue || sec.vars.key != "B" {
+		t.Errorf("second click: step %d key %q, want editing B", sec.vars.step, sec.vars.key)
+	}
+}
+
+func TestEnterEditsTheSelectedVariable(t *testing.T) {
+	f := newFake(t)
+	f.vars = []envfile.Var{{Key: "A", Value: "1"}}
+	m := newRoot(t, f)
+	open(t, m, "env")
+	send(t, m, "enter")
+	sec := m.sections[m.active].(*envSection)
+	if sec.vars.step != varValue || sec.vars.key != "A" {
+		t.Errorf("step %d key %q", sec.vars.step, sec.vars.key)
 	}
 }

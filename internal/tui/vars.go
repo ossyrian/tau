@@ -62,7 +62,7 @@ func (e *varEditor) Keys() []bkey.Binding {
 	if e.pick.Capturing() {
 		return keys
 	}
-	return append(keys, binding("n", "n", "new"), binding("e", "e", "edit"), binding("d", "d", "delete"), binding("v", "v", "reveal"))
+	return append(keys, binding("n", "n", "new"), binding("e", "e/enter", "edit"), binding("d", "d", "delete"), binding("v", "v", "reveal"))
 }
 
 // Hide masks the values again. Owners call it when the screen opens or closes.
@@ -101,8 +101,8 @@ func (e *varEditor) selected() (envfile.Var, bool) {
 	return envfile.Var{}, false
 }
 
-// Mouse handles a click or a wheel turn on the table. A click on the selected
-// row does nothing here: the editor has no enter action to repeat.
+// Mouse handles a click or a wheel turn on the table. Clicking the selected
+// row again edits it, as enter does.
 func (e *varEditor) Mouse(msg tea.MouseMsg) tea.Cmd {
 	at := msg.Mouse()
 	switch msg.(type) {
@@ -110,7 +110,9 @@ func (e *varEditor) Mouse(msg tea.MouseMsg) tea.Cmd {
 		return e.pick.Update(msg)
 	case tea.MouseClickMsg:
 		if at.Button == tea.MouseLeft && e.step == varBrowse { // else the prompt pane shifts the table
-			e.pick.Click(at.Y - 1) // -1: the pane's border
+			if again, ok := e.pick.Click(at.Y - 1); ok && again { // -1: the pane's border
+				return e.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			}
 		}
 	}
 	return nil
@@ -132,7 +134,7 @@ func (e *varEditor) Update(msg tea.KeyPressMsg) tea.Cmd {
 		e.step, e.editing, e.msg = varName, false, ""
 		e.name.SetValue("")
 		return e.name.Focus()
-	case "e":
+	case "e", "enter":
 		v, ok := e.selected()
 		if !ok {
 			return nil
