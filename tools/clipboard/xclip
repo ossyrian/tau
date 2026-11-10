@@ -1,0 +1,24 @@
+#!/bin/sh
+# Stand-in for xclip in the tau container. Pi pastes an image on Ctrl+V by
+# running `xclip -selection clipboard -t TARGETS -o` and then
+# `xclip -selection clipboard -t image/png -o`. The container has no display,
+# so this answers those two calls from the image that `tau` saved from the host
+# clipboard. Everything else fails, as xclip does without a display.
+
+image="${HOME}/share/clipboard/image.png"
+
+type= out=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -t | -target) type="${2-}"; shift ;;
+    -o | -out) out=1 ;;
+  esac
+  shift
+done
+
+[ -n "$out" ] && [ -s "$image" ] || exit 1
+case "$type" in
+  TARGETS) echo image/png ;;
+  image/png) cat "$image" ;;
+  *) exit 1 ;;
+esac

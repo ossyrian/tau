@@ -16,6 +16,7 @@ import (
 	"github.com/ossyrian/tau/internal/envfile"
 	"github.com/ossyrian/tau/internal/profile"
 	"github.com/ossyrian/tau/internal/proxy"
+	"github.com/ossyrian/tau/internal/relay"
 	"github.com/ossyrian/tau/internal/session"
 	"github.com/ossyrian/tau/internal/skills"
 	"github.com/ossyrian/tau/internal/workspace"
@@ -36,6 +37,8 @@ type (
 		Create(name string) (string, error)
 		Kill(name string) (string, error)
 		AttachArgs(name string) ([]string, error)
+		// Clipboard is what to relay on Ctrl+V in an attached terminal; nil if none.
+		Clipboard() relay.Clipboard
 	}
 	SkillStore interface {
 		List() ([]skills.Skill, error)
@@ -289,6 +292,16 @@ func (c *Core) AttachArgs(profile, name string) ([]string, error) {
 		return nil, err
 	}
 	return o.Sess.AttachArgs(name)
+}
+
+// Clipboard returns what a terminal attached to a session of the given
+// profile should relay on Ctrl+V, or nil when there is none.
+func (c *Core) Clipboard(profile string) relay.Clipboard {
+	o, err := c.of(profile)
+	if err != nil {
+		return nil
+	}
+	return o.Sess.Clipboard()
 }
 
 // of returns the Core of the named profile. An empty name, or a Core with no

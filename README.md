@@ -91,6 +91,17 @@ Everything per user is under `~/.tau/` (`TAU_HOME`). Nothing there is tracked.
 | `secrets/` | | proxy secrets, never mounted |
 | `profiles/NAME/` | | the same layout for another profile |
 
+## Pasting images
+
+Press Ctrl+V in an attached session, as in Pi on its own. The container has no
+clipboard, so `tau` copies the image on your clipboard to `~/.tau/share/clipboard/image.png`
+(`osascript` on macOS, `wl-paste` or `xclip` on Linux) just before Pi sees the key. An `xclip`
+stand-in in the image gives that file to Pi. The file is removed when you detach.
+
+This works only when you attach through `tau` (`tau sessions new`, `tau sessions attach`, or the
+terminal UI), not through a raw `docker exec` or `tmux attach`. A new image needs `tau build`
+and `tau restart`.
+
 ## Proxies
 
 Define a proxy once in the default profile's `config.yaml`. Each profile lists the
@@ -133,6 +144,6 @@ only. Branch protection is the real limit.
 
 ## Not ported yet
 
-These still exist only in the old bash script (`git show HEAD:tau`): `gitconfig`,
-`paste` and `migrate`. `AGENTS.md` has the detailed
+These still exist only in the old bash script (`git show HEAD:tau`): `gitconfig`
+and `migrate`. `AGENTS.md` has the detailed
 reference.

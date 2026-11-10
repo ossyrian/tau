@@ -603,3 +603,29 @@ func TestShellFailsWhenTheEnvironmentCannotBeRead(t *testing.T) {
 		t.Errorf("got %v", err)
 	}
 }
+
+type countingClip struct{ pastes int }
+
+func (c *countingClip) Paste() { c.pastes++ }
+func (c *countingClip) Clear() {}
+
+func TestWithoutAClipboardAttachGoesThroughDocker(t *testing.T) {
+	f := &fake{running: true, sessions: twoSessions}
+	m, _ := newMgr(f)
+	if m.Clipboard() != nil {
+		t.Error("a manager with no clipboard reports one")
+	}
+	if err := m.Attach("main"); err != nil || len(f.attached) != 1 {
+		t.Errorf("err %v attached %v", err, f.attached)
+	}
+}
+
+func TestAManagerReportsItsClipboard(t *testing.T) {
+	f := &fake{running: true}
+	m, _ := newMgr(f)
+	c := &countingClip{}
+	m.Clip = c
+	if m.Clipboard() != c {
+		t.Error("the manager hides its clipboard")
+	}
+}

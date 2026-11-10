@@ -16,6 +16,7 @@ import (
 	"github.com/ossyrian/tau/internal/core"
 	"github.com/ossyrian/tau/internal/dockercli"
 	"github.com/ossyrian/tau/internal/envfile"
+	"github.com/ossyrian/tau/internal/hostclip"
 	"github.com/ossyrian/tau/internal/profile"
 	"github.com/ossyrian/tau/internal/proxy"
 	"github.com/ossyrian/tau/internal/session"
@@ -237,6 +238,7 @@ func (e *environment) sessions(p profile.Profile) *session.Manager {
 	m := &session.Manager{
 		D: e.docker, Container: e.name, Profile: p.Name, User: p.User,
 		PiCmd: e.piCmd, Home: p.Home(), Workspace: sessionDir(p), Rand: session.RandomName, Loc: time.Local,
+		Clip: &hostclip.Bridge{Dir: filepath.Join(p.Share(), "clipboard"), Read: hostclip.Read},
 		Env: func() ([]string, error) {
 			vars, err := envfile.List(p.EnvFile())
 			if err != nil {

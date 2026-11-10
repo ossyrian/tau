@@ -16,6 +16,7 @@ import (
 	"github.com/ossyrian/tau/internal/envfile"
 	"github.com/ossyrian/tau/internal/profile"
 	"github.com/ossyrian/tau/internal/proxy"
+	"github.com/ossyrian/tau/internal/relay"
 	"github.com/ossyrian/tau/internal/session"
 	"github.com/ossyrian/tau/internal/skills"
 	"github.com/ossyrian/tau/internal/workspace"
@@ -58,6 +59,13 @@ func (f fakeSess) Preview(int) (map[string][]string, error) {
 func (f fakeSess) Create(string) (string, error)         { return "", nil }
 func (f fakeSess) Kill(n string) (string, error)         { return f.profile + "/" + n, f.err }
 func (f fakeSess) AttachArgs(n string) ([]string, error) { return []string{f.profile, n}, f.err }
+func (f fakeSess) Clipboard() relay.Clipboard            { return fakeClip(f.profile) }
+
+// fakeClip is a clipboard that is only its profile's name.
+type fakeClip string
+
+func (fakeClip) Paste() {}
+func (fakeClip) Clear() {}
 
 type fakeSkills struct {
 	n   int

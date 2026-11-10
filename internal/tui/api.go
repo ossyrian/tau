@@ -8,6 +8,7 @@ import (
 	"github.com/ossyrian/tau/internal/core"
 	"github.com/ossyrian/tau/internal/envfile"
 	"github.com/ossyrian/tau/internal/proxy"
+	"github.com/ossyrian/tau/internal/relay"
 	"github.com/ossyrian/tau/internal/session"
 	"github.com/ossyrian/tau/internal/skills"
 	"github.com/ossyrian/tau/internal/workspace"
@@ -26,6 +27,8 @@ type API interface {
 	CreateSession(name string) (string, error)
 	KillSession(profile, name string) (string, error)
 	AttachArgs(profile, name string) ([]string, error)
+	// Clipboard is what to relay on Ctrl+V while attached; nil if none.
+	Clipboard(profile string) relay.Clipboard
 
 	Skills() ([]skills.Skill, error)
 	ActivateSkill(nameOrPath string) (string, error)

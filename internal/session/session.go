@@ -7,11 +7,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ossyrian/tau/internal/relay"
 	"github.com/ossyrian/tau/internal/shell"
 )
 
@@ -48,6 +50,9 @@ type Manager struct {
 	Rand func() string
 	// Loc is the time zone for listed times.
 	Loc *time.Location
+	// Clip, when set, brings the host clipboard image into an attached
+	// session on Ctrl+V.
+	Clip relay.Clipboard
 }
 
 var (
@@ -83,8 +88,21 @@ func (m *Manager) tmux(sub ...string) (string, error) {
 
 func (m *Manager) attach(name string) error {
 	args := append(m.execArgs("-it"), tmuxArgs...)
-	return m.D.Run(append(args, "attach", "-t", "="+name)...)
+	return m.run(append(args, "attach", "-t", "="+name)...)
 }
+
+// run attaches the terminal to `docker <args>`. With a clipboard it goes
+// through a relay that watches for Ctrl+V.
+func (m *Manager) run(args ...string) error {
+	if m.Clip == nil {
+		return m.D.Run(args...)
+	}
+	return relay.New(exec.Command("docker", args...), m.Clip).Run()
+}
+
+// Clipboard is what a terminal attached to one of this profile's sessions
+// should relay on Ctrl+V. It is nil when there is none.
+func (m *Manager) Clipboard() relay.Clipboard { return m.Clip }
 
 func (m *Manager) needRunning() error {
 	out, err := m.D.Output("container", "inspect", "-f", "{{.State.Running}}", m.Container)
@@ -362,7 +380,7 @@ func (m *Manager) Attach(name string) error {
 	if err != nil {
 		return err
 	}
-	return m.D.Run(args...)
+	return m.run(args...)
 }
 
 // ShellArgs returns the docker arguments for an interactive zsh as the

@@ -36,7 +36,7 @@ Never assume a path outside `/workspace/`. A running catalog of the mounted work
 
 ## Images from the user
 
-The user pastes images with `tau paste` on their host; you see a path like `/home/pi/share/clipboard/clip-<timestamp>.png` in their message. Open it with the `read` tool to view it. If your model can't see images, say so and ask them to `/model` to a vision-capable one.
+The user pastes images with Ctrl+V; you see a path like `/tmp/pi-clipboard-<uuid>.png` in their message. Open it with the `read` tool to view it. If your model can't see images, say so and ask them to `/model` to a vision-capable one.
 
 ## Browser and serving to the user
 

@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/ossyrian/tau/internal/build"
 	"github.com/ossyrian/tau/internal/core"
+	"github.com/ossyrian/tau/internal/relay"
 	"github.com/ossyrian/tau/internal/theme"
 )
 
@@ -184,7 +185,11 @@ func (m Root) update(msg tea.Msg) (Root, tea.Cmd) {
 		return m, nil
 
 	case execMsg:
-		return m, tea.ExecProcess(msg.cmd, func(err error) tea.Msg { return execDoneMsg{err} })
+		done := func(err error) tea.Msg { return execDoneMsg{err} }
+		if msg.clip != nil {
+			return m, tea.Exec(relay.New(msg.cmd, msg.clip), done)
+		}
+		return m, tea.ExecProcess(msg.cmd, done)
 
 	case execDoneMsg:
 		m.notice, m.noticeErr = "", false

@@ -48,6 +48,10 @@ RUN mkdir -p /etc/tau && \
       'set -g extended-keys-format csi-u' \
       > /etc/tau/tmux.conf
 
+# Pi reads the clipboard through xclip. This stand-in answers from an image that
+# tau saves from the host clipboard on Ctrl+V.
+COPY tools/clipboard/xclip /usr/local/bin/xclip
+
 # tau-relay allows the container to talk to a browser on the host machine
 COPY tau-relay /usr/local/bin/tau-relay
 COPY --from=proxy /out/tau-proxy /usr/local/bin/tau-proxy

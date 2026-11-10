@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/ossyrian/tau/internal/container"
 	"github.com/ossyrian/tau/internal/core"
+	"github.com/ossyrian/tau/internal/relay"
 )
 
 // Messages that sections send to the root model, and the root sends back.
@@ -29,8 +30,12 @@ type (
 		prompt string
 		run    func() tea.Cmd
 	}
-	// execMsg asks the root to hand the terminal to cmd until it exits.
-	execMsg struct{ cmd *exec.Cmd }
+	// execMsg asks the root to hand the terminal to cmd until it exits. With a
+	// clip, Ctrl+V on the terminal first copies the host clipboard image.
+	execMsg struct {
+		cmd  *exec.Cmd
+		clip relay.Clipboard
+	}
 	// execDoneMsg says the terminal came back.
 	execDoneMsg struct{ err error }
 	// reloadMsg tells the active section to re-read its data.

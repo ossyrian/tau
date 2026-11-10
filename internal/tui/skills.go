@@ -203,7 +203,7 @@ func (s *skillsSection) edit() tea.Cmd {
 	if err != nil {
 		return func() tea.Msg { return doneMsg{err: err} }
 	}
-	return func() tea.Msg { return execMsg{cmd} }
+	return func() tea.Msg { return execMsg{cmd: cmd} }
 }
 
 // toggle flips the selected skill. It only edits config.yaml, and pressing

@@ -169,7 +169,7 @@ func (s *sessions) typing(msg tea.KeyPressMsg) tea.Cmd {
 			if err != nil {
 				return doneMsg{err: err}
 			}
-			return execMsg{exec.Command("docker", args...)}
+			return execMsg{exec.Command("docker", args...), s.api.Clipboard("")}
 		}
 	}
 	var cmd tea.Cmd
@@ -183,7 +183,7 @@ func (s *sessions) attach(profile, name string) tea.Cmd {
 		if err != nil {
 			return doneMsg{err: err}
 		}
-		return execMsg{exec.Command("docker", args...)}
+		return execMsg{exec.Command("docker", args...), s.api.Clipboard(profile)}
 	}
 }
 

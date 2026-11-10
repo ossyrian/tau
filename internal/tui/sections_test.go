@@ -394,3 +394,19 @@ func TestHomeOffersStartStopRestart(t *testing.T) {
 		t.Errorf("calls %v", f.did())
 	}
 }
+
+func TestAttachingCarriesTheProfilesClipboard(t *testing.T) {
+	f := newFake(t)
+	f.sessions = []session.Info{{Profile: "work", Name: "main", Kind: "main"}}
+	m := newRoot(t, f)
+	open(t, m, "sessions")
+	m.View()
+	_, cmd := m.Update(key("enter"))
+	msg, ok := runCmd(cmd).(execMsg)
+	if !ok {
+		t.Fatalf("enter did not hand the terminal over: %T", msg)
+	}
+	if msg.clip != fakeClip("work") {
+		t.Errorf("clip %v, want the work profile's", msg.clip)
+	}
+}

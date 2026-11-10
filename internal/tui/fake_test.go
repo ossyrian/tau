@@ -16,6 +16,7 @@ import (
 	"github.com/ossyrian/tau/internal/core"
 	"github.com/ossyrian/tau/internal/envfile"
 	"github.com/ossyrian/tau/internal/proxy"
+	"github.com/ossyrian/tau/internal/relay"
 	"github.com/ossyrian/tau/internal/session"
 	"github.com/ossyrian/tau/internal/skills"
 	"github.com/ossyrian/tau/internal/workspace"
@@ -72,6 +73,14 @@ func (f *fakeAPI) AttachArgs(p, n string) ([]string, error) {
 	f.rec("attach:" + p + "/" + n)
 	return append([]string{"exec", "-it", "tau", "attach"}, n), f.err
 }
+
+func (f *fakeAPI) Clipboard(p string) relay.Clipboard { return fakeClip(p) }
+
+// fakeClip is a clipboard that is only the profile's name.
+type fakeClip string
+
+func (fakeClip) Paste() {}
+func (fakeClip) Clear() {}
 
 func (f *fakeAPI) Skills() ([]skills.Skill, error)          { return f.skills, f.err }
 func (f *fakeAPI) ActivateSkill(n string) (string, error)   { return n, f.rec("activate:" + n) }
