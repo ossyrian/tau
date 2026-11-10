@@ -55,6 +55,27 @@ Run `tau -h` for the other commands:
 `tau workspaces cd NAME` and `tau workspaces add` print the host path, so
 `cd "$(tau workspaces cd NAME)"` changes your shell's directory.
 
+## The terminal UI
+
+`tau -i` shows the menu ("tau") on the left and the chosen section on the right.
+Sections with a list have two panes: the list above, and details below.
+
+| Keys | Does |
+|---|---|
+| `tab`, `shift+tab` | move the focus through the menu and each pane |
+| `h` `l` or `←` `→` | move between the menu and the main area |
+| `j` `k` or `↓` `↑` | move the cursor, scroll the detail pane, or pick a section in the menu |
+| `1`–`9` | open a section |
+| `/` | filter a list; `esc` clears it |
+| `enter` | act on the selected row (attach, edit, open variables) |
+| `q`, `ctrl+c` | quit |
+
+The mouse works too. Click a menu item to open it, and a row to select it; click
+the selected row again for `enter`. The wheel scrolls the pane under the pointer.
+Each section lists its own keys on the bottom line. Common ones: `x` or `space`
+toggles a skill, `t` or `space` toggles a proxy, `e` opens a skill in `$EDITOR`
+(or edits a variable), `d` kills a session or deletes, `n` is new.
+
 ## Files
 
 Everything per user is under `~/.tau/` (`TAU_HOME`). Nothing there is tracked.
