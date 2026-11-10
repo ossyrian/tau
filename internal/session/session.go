@@ -37,7 +37,9 @@ type Manager struct {
 	// PATH that holds the shim directory and this home's own bin directories.
 	Home string
 	// Env returns the profile's variables for a new session, as KEY=VALUE.
-	// They reach only sessions started afterwards.
+	// They reach only sessions started afterwards. A new session also copies
+	// them into the tmux server's global environment, so any session started
+	// from inside it (a subagent) inherits them without being told.
 	Env func() ([]string, error)
 	// Workspace is the directory a new session starts in. It is also passed to
 	// the session as TAU_WORKSPACE, so tools find the profile's workspace.
@@ -109,8 +111,10 @@ func (m *Manager) Create(name string) (string, error) {
 		return "", fmt.Errorf("session %q already exists", name)
 	}
 	args := []string{"new-session", "-d", "-s", name}
+	var vars []string
 	if m.Env != nil {
-		vars, err := m.Env()
+		var err error
+		vars, err = m.Env()
 		if err != nil {
 			return "", fmt.Errorf("env: %w", err)
 		}
@@ -133,7 +137,57 @@ func (m *Manager) Create(name string) (string, error) {
 	if _, err := m.tmux(append(args, cmd)...); err != nil {
 		return "", err
 	}
+	if vars != nil {
+		// The server exists only once a session does, so this follows new-session.
+		if err := m.shareEnv(vars); err != nil {
+			m.tmux("kill-session", "-t", "="+name) // no half-configured session
+			return "", fmt.Errorf("env: %w", err)
+		}
+	}
 	return name, nil
+}
+
+// envKeysVar names the global tmux variable that records which variables
+// shareEnv set, so a key since removed from .env can be unset.
+const envKeysVar = "TAU_ENV_KEYS"
+
+// shareEnv makes vars the tmux server's global environment. tmux gives a new
+// session only that environment plus its own -e flags, so without this a
+// session started from inside another (a subagent) would lose them.
+func (m *Manager) shareEnv(vars []string) error {
+	keys := make([]string, len(vars))
+	for i, kv := range vars {
+		keys[i], _, _ = strings.Cut(kv, "=")
+	}
+	// An unset marker is an error to tmux and means nothing was shared yet.
+	if out, err := m.tmux("show-environment", "-g", envKeysVar); err == nil {
+		_, old, _ := strings.Cut(strings.TrimSpace(out), "=")
+		for _, k := range strings.Split(old, ",") {
+			if k != "" && !contains(keys, k) {
+				if _, err := m.tmux("set-environment", "-g", "-u", k); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for _, kv := range vars {
+		k, v, _ := strings.Cut(kv, "=")
+		// "--" so a value starting with "-" is not read as a flag.
+		if _, err := m.tmux("set-environment", "-g", "--", k, v); err != nil {
+			return err
+		}
+	}
+	_, err := m.tmux("set-environment", "-g", "--", envKeysVar, strings.Join(keys, ","))
+	return err
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 type row struct {

@@ -171,7 +171,7 @@ function rejectCredentialOverrides(args: readonly string[]): void {
 
 // Validate the requested model against the session's configured models and resolve
 // its credentials. Falls back to the parent's own model when none is requested, so
-// a subagent never inherits stray provider env or starts with invalid credentials.
+// a subagent never starts with a model whose credentials are invalid.
 async function resolveModel(requested: string | undefined, ctx: ExtensionContext): Promise<ResolvedModel> {
 	await ctx.modelRegistry.refresh();
 	const parsed = requested ? splitThinkingSuffix(requested) : null;
@@ -203,6 +203,9 @@ async function resolveModel(requested: string | undefined, ctx: ExtensionContext
 		argument: `${model.provider}/${model.id}${suffix}`,
 		id: model.id,
 		provider: model.provider,
+		// Only credentials Pi resolved itself. The profile's .env (LITELLM_API_KEY,
+		// CLAUDE_CODE_OAUTH_TOKEN, ...) reaches the subagent through the tmux server's
+		// global environment, which `tau sessions new` fills.
 		environment: auth.env ?? {},
 	};
 }
@@ -253,8 +256,8 @@ async function createSession(opts: CreateOptions, ctx: ExtensionContext): Promis
 
 	const cmd = ["pi", ...piArgs].map(shellQuote).join(" ");
 
-	// Pass the resolved provider credentials into the subagent's tmux env so it starts
-	// with valid auth instead of whatever happens to be inherited.
+	// Pass credentials Pi resolved for this model into the subagent's tmux env. They take
+	// precedence over the inherited profile environment.
 	const credentialArgs = Object.entries(resolvedModel.environment).flatMap(([name, value]) => ["-e", `${name}=${value}`]);
 	const paneId = tmux([
 		"new-session",

@@ -37,7 +37,7 @@ The user sometimes calls this workflow "subagent". Existing skills (e.g. the voi
 - **No valid credentials** for the model's provider → the tool errors instead of spawning a session that would fail on its first turn.
 - **Omit `model`** → the subagent inherits your own model.
 
-The subagent's provider credentials are resolved from the model config and passed in explicitly, so a subagent never picks up stray or wrong credentials from the environment. Do not pass `--api-key`, `--model`, or `--provider` through `extraArgs` — the extension rejects them; set `model` instead.
+A subagent inherits the profile's `.env` variables (such as `LITELLM_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`) from the tmux server, which `tau sessions new` fills. Credentials Pi resolves for the chosen model are passed in explicitly and take precedence. Proxied credentials are never in this environment. Do not pass `--api-key`, `--model`, or `--provider` through `extraArgs` — the extension rejects them; set `model` instead.
 
 ## Messaging another running session
 

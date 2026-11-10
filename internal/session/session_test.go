@@ -18,6 +18,8 @@ type fake struct {
 	calls    [][]string
 	attached [][]string
 	failOn   string // tmux subcommand that fails
+	// globalKeys is what `show-environment -g TAU_ENV_KEYS` prints; "" means unset.
+	globalKeys string
 }
 
 var tmuxPrefix = []string{"exec", "-u", "pi", "tau", "tmux", "-L", "tau", "-f", "/etc/tau/tmux.conf"}
@@ -45,6 +47,11 @@ func (f *fake) Output(args ...string) (string, error) {
 		return f.sessions, nil
 	case "has-session":
 		return "", f.hasErr
+	case "show-environment":
+		if f.globalKeys == "" {
+			return "", errors.New("unknown variable: TAU_ENV_KEYS")
+		}
+		return f.globalKeys + "\n", nil
 	}
 	return "", nil
 }
@@ -443,6 +450,83 @@ func TestASessionGetsTheProfilesVariablesInOrder(t *testing.T) {
 	if !f.did(f.tmux("new-session", "-d", "-s", "w", "-e", "A=1", "-e", "B=two words", "pi")) {
 		t.Errorf("calls: %v", f.calls)
 	}
+}
+
+func TestTheProfilesVariablesAlsoGoToTheServersGlobalEnvironment(t *testing.T) {
+	f := &fake{running: true, hasErr: errors.New("none")}
+	m, _ := newMgr(f)
+	m.Env = func() ([]string, error) { return []string{"A=1", "TOKEN=-x=y"}, nil }
+	if _, err := m.Create("w"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range [][]string{
+		f.tmux("set-environment", "-g", "--", "A", "1"),
+		f.tmux("set-environment", "-g", "--", "TOKEN", "-x=y"), // value kept whole, even with "-" and "="
+		f.tmux("set-environment", "-g", "--", "TAU_ENV_KEYS", "A,TOKEN"),
+	} {
+		if !f.did(want) {
+			t.Errorf("missing %v in %v", want, f.calls)
+		}
+	}
+	// The server exists only after new-session, so sharing must follow it.
+	var order []string
+	for _, c := range f.calls {
+		if len(c) > len(tmuxPrefix) {
+			order = append(order, c[len(tmuxPrefix)])
+		}
+	}
+	if i, j := indexOf(order, "new-session"), indexOf(order, "set-environment"); i < 0 || j < i {
+		t.Errorf("order: %v", order)
+	}
+}
+
+func TestAKeyRemovedFromEnvIsUnsetGlobally(t *testing.T) {
+	f := &fake{running: true, hasErr: errors.New("none"), globalKeys: "TAU_ENV_KEYS=A,GONE"}
+	m, _ := newMgr(f)
+	m.Env = func() ([]string, error) { return []string{"A=1"}, nil }
+	if _, err := m.Create("w"); err != nil {
+		t.Fatal(err)
+	}
+	if !f.did(f.tmux("set-environment", "-g", "-u", "GONE")) {
+		t.Errorf("GONE not unset: %v", f.calls)
+	}
+	if f.did(f.tmux("set-environment", "-g", "-u", "A")) {
+		t.Error("a kept key was unset")
+	}
+}
+
+func TestAFailureSharingTheEnvironmentKillsTheNewSession(t *testing.T) {
+	f := &fake{running: true, hasErr: errors.New("none"), failOn: "set-environment"}
+	m, _ := newMgr(f)
+	m.Env = func() ([]string, error) { return []string{"A=1"}, nil }
+	if _, err := m.Create("w"); err == nil {
+		t.Fatal("want an error")
+	}
+	if !f.did(f.tmux("kill-session", "-t", "=w")) {
+		t.Errorf("session left behind: %v", f.calls)
+	}
+}
+
+func TestNoEnvFuncMeansNothingIsShared(t *testing.T) {
+	f := &fake{running: true, hasErr: errors.New("none")}
+	m, _ := newMgr(f)
+	if _, err := m.Create("w"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range f.calls {
+		if len(c) > len(tmuxPrefix) && c[len(tmuxPrefix)] == "set-environment" {
+			t.Errorf("unexpected %v", c)
+		}
+	}
+}
+
+func indexOf(list []string, s string) int {
+	for i, x := range list {
+		if x == s {
+			return i
+		}
+	}
+	return -1
 }
 
 func TestAnEnvErrorStopsTheSession(t *testing.T) {
