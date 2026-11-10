@@ -232,6 +232,10 @@ async function createSession(opts: CreateOptions, ctx: ExtensionContext): Promis
 
 	const piArgs: string[] = [];
 	if (!saveSession) piArgs.push("--no-session");
+	// Nobody can answer pi's "Trust project folder?" prompt in a detached subagent pane, so a
+	// cwd with .pi/ resources would hang it before it reports ready. Skip project-local
+	// resources by default; pass extraArgs ["--approve"] to opt a subagent in.
+	piArgs.push("--no-approve");
 	if (opts.label) piArgs.push("--name", opts.label);
 	piArgs.push("--model", resolvedModel.argument);
 	if (opts.tools) piArgs.push("--tools", opts.tools);
