@@ -69,6 +69,9 @@ func (m *master) mouse(msg tea.MouseMsg) tea.Cmd {
 	return nil
 }
 
+// focusIndex is the focused pane, or -1.
+func (m *master) focusIndex() int { return int(m.focus) }
+
 // detailFocused is true when the detail pane has the keyboard and is drawn.
 func (m *master) detailFocused() bool { return m.on(1) && m.Panes() == 2 }
 

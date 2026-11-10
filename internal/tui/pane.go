@@ -3,6 +3,7 @@ package tui
 import (
 	bkey "charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ossyrian/tau/internal/theme"
 )
@@ -51,6 +52,12 @@ const (
 )
 
 func tooSmall(w, h int) bool { return w < minWidth || h < minHeight }
+
+// tooSmallView is what a screen shows in a terminal below the minimum size.
+func tooSmallView(w, h int) string {
+	msg := fmt.Sprintf("terminal too small: tau needs %d×%d, this is %d×%d", minWidth, minHeight, w, h)
+	return lipgloss.NewStyle().Width(max(w, 1)).Render(msg)
+}
 
 // sidebarWidth is a fifth of the screen, within bounds.
 func sidebarWidth(w int) int { return min(max(w/5, 16), 28) }

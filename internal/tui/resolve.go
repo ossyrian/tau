@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
+	bkey "charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/ossyrian/tau/internal/config"
 	"github.com/ossyrian/tau/internal/theme"
 )
@@ -17,11 +20,15 @@ type item struct {
 
 // Resolve is the screen that asks the user what to do with each piece of drift
 // between config.yaml and config.runtime.yaml. Each decision is written to disk
-// at once, so quitting midway keeps what was already decided.
+// at once, so quitting midway keeps what was already decided. It is the same
+// pair of panes the packages section draws: the changes as a table, and the
+// selected one's YAML below it.
 type Resolve struct {
 	cfg      *config.Config
 	items    []item
-	cursor   int
+	m        *master
+	help     help.Model
+	w, h     int
 	resolved int
 	err      string
 	settled  bool
@@ -29,7 +36,7 @@ type Resolve struct {
 
 // NewResolve lists the drift in cfg, in the order it appears in the runtime file.
 func NewResolve(cfg *config.Config) Resolve {
-	m := Resolve{cfg: cfg}
+	m := Resolve{cfg: cfg, m: newMaster(true, "NAME", "CHANGE"), help: newHelp(80)}
 	d := cfg.Diff()
 	only, changed := toSet(d.RuntimeOnly), toSet(d.Changed)
 	if cfg.Runtime != nil {
@@ -42,6 +49,7 @@ func NewResolve(cfg *config.Config) Resolve {
 			}
 		}
 	}
+	m.fill()
 	return m
 }
 
@@ -52,6 +60,25 @@ func toSet(l []string) map[string]bool {
 	}
 	return s
 }
+
+// fill puts the items in the table.
+func (m *Resolve) fill() {
+	rows := make([]pickerRow, len(m.items))
+	for i, it := range m.items {
+		rows[i] = pickerRow{Key: it.name, Cells: []string{it.name, it.kind()}}
+	}
+	m.m.pick.SetRows(rows)
+}
+
+func (it item) kind() string {
+	if it.runtimeOnly {
+		return "added at runtime"
+	}
+	return "changed"
+}
+
+// cursor is the index of the selected item.
+func (m Resolve) cursor() int { return m.m.pick.table.Cursor() }
 
 // Done reports whether all drift is resolved and config.runtime.yaml is gone.
 func (m Resolve) Done() bool { return m.settled }
@@ -76,33 +103,46 @@ func (m Resolve) Init() tea.Cmd {
 }
 
 func (m Resolve) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	k, ok := msg.(tea.KeyPressMsg)
-	if !ok {
-		return m, nil
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.w, m.h = msg.Width, msg.Height
+		m.help.SetWidth(msg.Width - 1)
+	case tea.MouseMsg:
+		return m.mouse(msg)
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "q", "esc", "ctrl+c":
+			return m, tea.Quit
+		case "tab", "shift+tab":
+			m.m.Focus(1 - max(m.m.focusIndex(), 0))
+			return m, nil
+		case "a", "r":
+			next, finished := m.Handle(msg.String())
+			if finished {
+				return next, tea.Quit
+			}
+			return next, nil
+		}
+		return m, m.m.Update(msg)
 	}
-	switch k.String() {
-	case "q", "esc", "ctrl+c":
-		return m, tea.Quit
-	}
-	next, finished := m.Handle(k.String())
-	if finished {
-		return next, tea.Quit
-	}
-	return next, nil
+	return m, nil
 }
 
-// Handle applies one key (a, r, up/k, down/j) and reports whether the last
-// item was just resolved. It never quits the program.
+// mouse focuses the pane a click lands in; the table and the detail pane do the rest.
+func (m Resolve) mouse(msg tea.MouseMsg) (Resolve, tea.Cmd) {
+	if tooSmall(m.w, m.h) || msg.Mouse().Y >= m.h-1 {
+		return m, nil
+	}
+	if _, ok := msg.(tea.MouseClickMsg); ok && msg.Mouse().Button == tea.MouseLeft {
+		m.m.Focus(m.m.PaneAt(msg.Mouse().Y))
+	}
+	return m, m.m.Update(msg)
+}
+
+// Handle applies a (accept) or r (reject) to the selected item and reports
+// whether the last item was just resolved. It never quits the program.
 func (m Resolve) Handle(key string) (next Resolve, finished bool) {
 	switch key {
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.items)-1 {
-			m.cursor++
-		}
 	case "a":
 		return m.act(true)
 	case "r":
@@ -130,17 +170,17 @@ func (m Resolve) act(accept bool) (Resolve, bool) {
 	if len(m.items) == 0 {
 		return m, false
 	}
-	it := m.items[m.cursor]
+	at := m.cursor()
+	it := m.items[at]
 	if err := m.cfg.Apply(it.name, actionFor(it.runtimeOnly, accept)); err != nil {
 		m.err = fmt.Sprintf("%s: %v", it.name, err)
 		return m, false
 	}
 	m.err = ""
 	m.resolved++
-	m.items = append(m.items[:m.cursor:m.cursor], m.items[m.cursor+1:]...)
-	if m.cursor >= len(m.items) && m.cursor > 0 {
-		m.cursor--
-	}
+	m.items = append(m.items[:at:at], m.items[at+1:]...)
+	m.fill()
+	m.m.pick.SetCursor(at) // the next item takes the place; at the end, the last one
 	if len(m.items) > 0 {
 		return m, false
 	}
@@ -153,69 +193,36 @@ func (m Resolve) act(accept bool) (Resolve, bool) {
 	return m, true
 }
 
-func (m Resolve) View() tea.View { return tea.NewView(m.Body()) }
-
-// Body is the screen's text, for embedding in another screen.
-func (m Resolve) Body() string {
-	var b strings.Builder
-	b.WriteString(theme.Title.Render("config.runtime.yaml differs from config.yaml") + "\n")
-	b.WriteString(theme.Dim.Render("config.yaml is the source of truth. Decide what to do with each change.") + "\n\n")
-
-	for i, it := range m.items {
-		kind := "changed"
-		if it.runtimeOnly {
-			kind = "added at runtime"
+func (m Resolve) View() tea.View {
+	var v tea.View
+	if tooSmall(m.w, m.h) {
+		v = tea.NewView(tooSmallView(m.w, m.h))
+	} else {
+		title, body := "changes", ""
+		if len(m.items) > 0 {
+			it := m.items[m.cursor()]
+			title, body = it.name+" ("+it.kind()+")", highlight("yaml", driftYAML(m.cfg, it.name, it.runtimeOnly))
 		}
-		line := fmt.Sprintf("%-24s %s", it.name, theme.Dim.Render(kind))
-		if i == m.cursor {
-			line = theme.Selected.Render("> ") + line
-		} else {
-			line = "  " + line
+		if base := m.cfg.Diff().BaseOnly; len(base) > 0 {
+			body += "\n" + theme.Dim.Render("Also in config.yaml and not yet in the runtime copy (added on next build): "+strings.Join(base, ", "))
 		}
-		b.WriteString(line + "\n")
+		panes := m.m.View(m.w, m.h-1, "config.runtime.yaml differs from config.yaml", title, body)
+		v = tea.NewView(column(panes, lipgloss.NewStyle().MaxWidth(m.w).MaxHeight(1).Render(m.helpLine())))
 	}
-	if len(m.items) > 0 {
-		b.WriteString("\n" + m.detail(m.items[m.cursor]))
-	}
-	if base := m.cfg.Diff().BaseOnly; len(base) > 0 {
-		b.WriteString("\n" + theme.Dim.Render("Also in config.yaml and not yet in the runtime copy (added on next build): "+strings.Join(base, ", ")) + "\n")
-	}
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+// helpLine is the error if there is one, else the keys for the selected item.
+func (m Resolve) helpLine() string {
 	if m.err != "" {
-		b.WriteString("\n" + theme.Err.Render("error: "+m.err) + "\n")
+		return theme.Err.Render("error: " + m.err)
 	}
-	b.WriteString("\n" + m.help() + "\n")
-	return b.String()
-}
-
-func (m Resolve) detail(it item) string {
-	var b strings.Builder
-	if it.runtimeOnly {
-		b.WriteString(theme.Title.Render("runtime") + "\n" + indent(m.cfg.Runtime.Packages[it.name].YAML()) + "\n")
-		return b.String()
+	accept, reject := "use the runtime version in config.yaml", "revert the runtime copy"
+	if len(m.items) > 0 && m.items[m.cursor()].runtimeOnly {
+		accept, reject = "add to config.yaml", "discard"
 	}
-	b.WriteString(theme.Title.Render("config.yaml") + "\n" + indent(m.cfg.Base.Packages[it.name].YAML()) + "\n")
-	b.WriteString(theme.Title.Render("runtime") + "\n" + indent(m.cfg.Runtime.Packages[it.name].YAML()) + "\n")
-	return b.String()
-}
-
-func (m Resolve) help() string {
-	if len(m.items) == 0 {
-		return ""
-	}
-	quit := "   q quit"
-	if m.items[m.cursor].runtimeOnly {
-		return theme.Dim.Render("a add to config.yaml   r discard   ↑/↓ move" + quit)
-	}
-	return theme.Dim.Render("a use the runtime version in config.yaml   r revert the runtime copy   ↑/↓ move" + quit)
-}
-
-func indent(s string) string {
-	if s == "" {
-		return "  (empty: uses the catalog definition)\n"
-	}
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	for i, l := range lines {
-		lines[i] = "  " + l
-	}
-	return strings.Join(lines, "\n") + "\n"
+	keys := []bkey.Binding{binding("a", "a", accept), binding("r", "r", reject)}
+	return m.help.ShortHelpView(append(keys, m.m.Keys()...))
 }

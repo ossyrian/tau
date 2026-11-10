@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ossyrian/tau/internal/config"
 )
 
@@ -73,6 +74,12 @@ func press(m Resolve, keys ...string) (Resolve, bool) {
 		}
 	}
 	return m, quit
+}
+
+// sized gives the screen a terminal to draw in.
+func sized(m Resolve) Resolve {
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	return next.(Resolve)
 }
 
 func names(m Resolve) []string {
@@ -172,27 +179,27 @@ func TestCursorMovesAndActsOnTheSelectedItem(t *testing.T) {
 	if want := []string{"x", "r1"}; !reflect.DeepEqual(names(m), want) {
 		t.Errorf("remaining: %v", names(m))
 	}
-	if m.cursor != 1 {
-		t.Errorf("cursor should clamp to the last item, got %d", m.cursor)
+	if m.cursor() != 1 {
+		t.Errorf("cursor should clamp to the last item, got %d", m.cursor())
 	}
 }
 
 func TestCursorStaysInRange(t *testing.T) {
 	_, c := setup(t, baseYAML, runtimeYAML)
 	m, _ := press(NewResolve(c), "up", "up", "k")
-	if m.cursor != 0 {
-		t.Errorf("cursor %d", m.cursor)
+	if m.cursor() != 0 {
+		t.Errorf("cursor %d", m.cursor())
 	}
 	m, _ = press(m, "down", "down", "down", "down", "j")
-	if m.cursor != 2 {
-		t.Errorf("cursor %d", m.cursor)
+	if m.cursor() != 2 {
+		t.Errorf("cursor %d", m.cursor())
 	}
 }
 
 func TestFailedActionShowsErrorAndKeepsItem(t *testing.T) {
 	dir, c := setup(t, "packages:\n  a: {script: sa}\n",
 		"packages:\n  a: {script: sa}\n  bad: {script: s, needs: [ghost]}\n  ok: {script: so}\n")
-	m, _ := press(NewResolve(c), "a") // promoting bad would break config.yaml
+	m, _ := press(sized(NewResolve(c)), "a") // promoting bad would break config.yaml
 	if !reflect.DeepEqual(names(m), []string{"bad", "ok"}) {
 		t.Errorf("failed item must stay: %v", names(m))
 	}
@@ -271,5 +278,71 @@ func TestItemsCountsWhatIsLeft(t *testing.T) {
 	m, _ = m.Handle("a")
 	if len(m.items) != 2 {
 		t.Errorf("pending %d", len(m.items))
+	}
+}
+
+func TestResolveTabMovesBetweenTheTableAndTheDetailPane(t *testing.T) {
+	_, c := setup(t, baseYAML, runtimeYAML)
+	m := sized(NewResolve(c))
+	if m.m.focusIndex() != 0 {
+		t.Fatalf("starts on pane %d", m.m.focusIndex())
+	}
+	m, _ = press(m, "tab")
+	if m.m.focusIndex() != 1 {
+		t.Errorf("tab: pane %d", m.m.focusIndex())
+	}
+	m, _ = press(m, "shift+tab")
+	if m.m.focusIndex() != 0 {
+		t.Errorf("shift+tab: pane %d", m.m.focusIndex())
+	}
+}
+
+func TestResolveJKAndTheArrowsMoveTheCursorAndScrollTheDetailByFocus(t *testing.T) {
+	_, c := setup(t, baseYAML, runtimeYAML)
+	m := sized(NewResolve(c))
+	m, _ = press(m, "j", "down", "j", "k", "up")
+	if m.cursor() != 0 {
+		t.Errorf("cursor %d", m.cursor())
+	}
+	m, _ = press(m, "j")
+	m, _ = press(m, "tab", "j", "j")
+	if m.cursor() != 1 {
+		t.Errorf("scrolling the detail moved the cursor to %d", m.cursor())
+	}
+}
+
+func TestResolveClickSelectsAndTheWheelMovesTheCursor(t *testing.T) {
+	_, c := setup(t, baseYAML, runtimeYAML)
+	m := sized(NewResolve(c))
+	m.View()                         // the program draws before every event
+	next, _ := m.Update(click(4, 3)) // border, header, x, r1
+	m = next.(Resolve)
+	if m.cursor() != 1 {
+		t.Fatalf("click: cursor %d", m.cursor())
+	}
+	next, _ = m.Update(wheel(4, 3, tea.MouseWheelDown))
+	m = next.(Resolve)
+	if m.cursor() != 2 {
+		t.Errorf("wheel: cursor %d", m.cursor())
+	}
+	next, _ = m.Update(click(4, 20)) // the detail pane
+	if next.(Resolve).m.focusIndex() != 1 {
+		t.Error("clicking the detail pane did not focus it")
+	}
+}
+
+func TestResolveFillsTheTerminalAndAsksForTheMouse(t *testing.T) {
+	_, c := setup(t, baseYAML, runtimeYAML)
+	v := sized(NewResolve(c)).View()
+	if got := len(strings.Split(v.Content, "\n")); got != 30 {
+		t.Errorf("%d lines in a 30-line terminal", got)
+	}
+	if v.MouseMode != tea.MouseModeCellMotion {
+		t.Error("no mouse")
+	}
+	for _, want := range []string{"x (changed)", "base-x", "runtime-x", "late"} {
+		if !strings.Contains(ansi.Strip(v.Content), want) {
+			t.Errorf("screen lacks %q", want)
+		}
 	}
 }

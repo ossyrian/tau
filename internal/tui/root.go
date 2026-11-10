@@ -393,8 +393,7 @@ func (m Root) layoutAt(w, h int) (left, right, rows int) {
 func (m Root) View() tea.View {
 	var v tea.View
 	if tooSmall(m.w, m.h) {
-		msg := fmt.Sprintf("terminal too small: tau needs %d×%d, this is %d×%d", minWidth, minHeight, m.w, m.h)
-		v = tea.NewView(lipgloss.NewStyle().Width(max(m.w, 1)).Render(msg))
+		v = tea.NewView(tooSmallView(m.w, m.h))
 	} else {
 		left, right, rows := m.layout()
 		sidebar := column(

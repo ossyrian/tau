@@ -234,25 +234,35 @@ func (p *packages) detailText() (title, text string) {
 		return "build log", cleanLog(p.log.String())
 	}
 	name := p.selectedName()
-	yaml := func(pk config.Package) string {
-		y := pk.YAML()
-		if y == "" {
-			return "# empty: uses the catalog definition\n"
-		}
-		return y
-	}
 	if p.changed[name] {
-		return name + " (changed)", highlight("yaml",
-			"# config.yaml\n"+yaml(p.cfg.Base.Packages[name])+"\n# config.runtime.yaml\n"+yaml(p.cfg.Runtime.Packages[name]))
+		return name + " (changed)", highlight("yaml", driftYAML(p.cfg, name, false))
 	}
-	if added, ok := p.added[name]; ok {
-		return name + " (added at runtime)", highlight("yaml", "# config.runtime.yaml\n"+yaml(added))
+	if _, ok := p.added[name]; ok {
+		return name + " (added at runtime)", highlight("yaml", driftYAML(p.cfg, name, true))
 	}
 	pk, ok := p.entries[name]
 	if !ok {
 		return "package", ""
 	}
-	return name, highlight("yaml", yaml(pk))
+	return name, highlight("yaml", packageYAML(pk))
+}
+
+// packageYAML is a package as YAML, with a note when it is empty.
+func packageYAML(pk config.Package) string {
+	if y := pk.YAML(); y != "" {
+		return y
+	}
+	return "# empty: uses the catalog definition\n"
+}
+
+// driftYAML shows a package that differs between the files: both versions, or
+// the runtime one alone when the agent added it.
+func driftYAML(cfg *config.Config, name string, runtimeOnly bool) string {
+	runtime := "# config.runtime.yaml\n" + packageYAML(cfg.Runtime.Packages[name])
+	if runtimeOnly {
+		return runtime
+	}
+	return "# config.yaml\n" + packageYAML(cfg.Base.Packages[name]) + "\n" + runtime
 }
 
 func (p *packages) View(w, h int) string {

@@ -107,6 +107,9 @@ func (p *picker) Click(y int) (again, ok bool) {
 	return d == 0, true
 }
 
+// SetCursor puts the cursor on shown row i, or the nearest row.
+func (p *picker) SetCursor(i int) { p.table.SetCursor(i) }
+
 // Capturing is true while the filter has the keyboard.
 func (p *picker) Capturing() bool { return p.typing }
 
