@@ -412,7 +412,7 @@ type fakeProxy struct {
 func (f *fakeProxy) Proxies() (config.Proxies, error) {
 	return config.Proxies{Active: []string{"a"}}, f.err
 }
-func (f *fakeProxy) Use(n string, on bool) error {
+func (f *fakeProxy) SetActive(n string, on bool) error {
 	f.calls = append(f.calls, "use:"+n+"="+strconv.FormatBool(on))
 	return f.err
 }
@@ -440,7 +440,7 @@ func TestProxyCallsGoToTheStore(t *testing.T) {
 	if p, err := c.Proxies(); err != nil || len(p.Active) != 1 {
 		t.Errorf("Proxies: %+v %v", p, err)
 	}
-	c.UseProxy("a", true)
+	c.SetProxyActive("a", true)
 	c.ProxyVars("a")
 	c.SetProxyVar("a", "K", "v")
 	c.UnsetProxyVar("a", "K")
@@ -459,7 +459,7 @@ func TestProxyCallsReportStoreErrors(t *testing.T) {
 	if err := c.RefreshProxies(nil); err == nil || err.Error() != "boom" {
 		t.Errorf("got %v", err)
 	}
-	if err := c.UseProxy("a", true); err == nil {
+	if err := c.SetProxyActive("a", true); err == nil {
 		t.Error("use hid the error")
 	}
 }
@@ -470,7 +470,7 @@ func TestWithoutAProxyStoreEveryProxyCallSaysSo(t *testing.T) {
 		t.Errorf("listing with no store: %+v %v", p, err)
 	}
 	for name, err := range map[string]error{
-		"use":     c.UseProxy("a", true),
+		"use":     c.SetProxyActive("a", true),
 		"set":     c.SetProxyVar("a", "K", "v"),
 		"reload":  c.ReloadProxies(),
 		"refresh": c.RefreshProxies(nil),

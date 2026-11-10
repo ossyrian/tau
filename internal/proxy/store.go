@@ -62,8 +62,8 @@ func (s *Store) reload(what string) error {
 	return nil
 }
 
-// Use lets this profile call a proxy (on) or stops it (off).
-func (s *Store) Use(name string, on bool) error {
+// SetActive lets this profile call a proxy (on) or stops it (off).
+func (s *Store) SetActive(name string, on bool) error {
 	p, err := s.defined(name)
 	if err != nil {
 		return err
@@ -77,9 +77,9 @@ func (s *Store) Use(name string, on bool) error {
 	}
 	switch {
 	case on && idx >= 0:
-		return fmt.Errorf("%s is already in use", name)
+		return fmt.Errorf("%s is already active", name)
 	case !on && idx < 0:
-		return fmt.Errorf("%s is not in use", name)
+		return fmt.Errorf("%s is not active", name)
 	case on:
 		active = append(active, name)
 	default:
@@ -93,9 +93,9 @@ func (s *Store) Use(name string, on bool) error {
 	if err := config.SaveProxiesActive(s.Dir, active); err != nil {
 		return err
 	}
-	verb := "stopping " + name
+	verb := "deactivating " + name
 	if on {
-		verb = "using " + name
+		verb = "activating " + name
 	}
 	return s.reload(verb)
 }
@@ -140,7 +140,7 @@ func (s *Store) Reload() error {
 }
 
 // Refresh mints fresh credentials for the named proxies and sends them to the
-// servers. With no names it refreshes every proxy in use. Every name must be a
+// servers. With no names it refreshes every active proxy. Every name must be a
 // proxy this profile can see; the refresh reaches every profile that uses it.
 func (s *Store) Refresh(names []string) error {
 	if s.Servers == nil {

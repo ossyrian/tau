@@ -85,7 +85,7 @@ proxies:
         curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/a.zip
         unzip -q /tmp/a.zip -d /tmp && /tmp/aws/install -i "$PREFIX" -b "$PREFIX/bin"
   defs:
-    aws-prod:                          # a label for `tau proxies allow`, `env`, `refresh`; the agent never sees it
+    aws-prod:                          # a label for `tau proxies activate`, `env`, `refresh`; the agent never sees it
       package: aws-cli
       binary: bin/aws
       agent_command: aws
@@ -109,18 +109,18 @@ proxies:
   active: [aws-prod]                   # only prod's credentials
 ```
 
-A profile cannot activate two proxies with the same `agent_command`: `tau proxies allow` refuses the second.
+A profile cannot activate two proxies with the same `agent_command`: `tau proxies activate` refuses the second.
 
 ```bash
 tau proxies list                            # definitions, what the agent types, and whether this profile uses each
-tau proxies allow gh / tau proxies disallow gh   # per profile
+tau proxies activate gh / tau proxies deactivate gh   # per profile
 tau proxies env set aws-prod AWS_REGION eu-west-1
 tau proxies env list aws-prod [--show]        # values are masked unless --show
 tau proxies refresh [PROXY...]              # mint fresh credentials; all in use if none named
 tau proxies reload                          # push stored variables and choices; mints nothing
 ```
 
-**Credentials and refresh.** `env_from` runs on the host at `tau start` and on `tau proxies refresh`. It never runs on `env set`, `allow`, `disallow` or `reload`: those keep the credentials a server already holds. `tau proxies refresh aws-prod` runs only `aws-prod`'s `env_from` and reloads only its server, so only the profiles that use it see new credentials. If `env_from` fails, every server keeps its old credentials and the error names the proxy. Nothing refreshes on a timer: re-run `refresh` when a credential expires.
+**Credentials and refresh.** `env_from` runs on the host at `tau start` and on `tau proxies refresh`. It never runs on `env set`, `activate`, `deactivate` or `reload`: those keep the credentials a server already holds. `tau proxies refresh aws-prod` runs only `aws-prod`'s `env_from` and reloads only its server, so only the profiles that use it see new credentials. If `env_from` fails, every server keeps its old credentials and the error names the proxy. Nothing refreshes on a timer: re-run `refresh` when a credential expires.
 
 **What needs a rebuild.** Only `proxies.packages` and a proxy's `binary` (they install into the image). Adding, removing or changing a proxy, its secrets, `deny`, `env_from` or `allow` needs no rebuild and no restart; `tau proxies reload` applies it.
 

@@ -74,13 +74,9 @@ func (a *App) proxiesCmd() *cobra.Command {
 		return nil
 	}}
 
-	use := func(verb string, add bool) *cobra.Command {
-		short := "allow the use of this proxy"
-		if !add {
-			short = "disallow the use of this proxy"
-		}
-		return &cobra.Command{Use: verb + " PROXY", Short: short, Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
-			return a.setUse(args[0], add)
+	activation := func(verb string, on bool) *cobra.Command {
+		return &cobra.Command{Use: verb + " PROXY", Short: verb + " this proxy for the profile", Args: cobra.ExactArgs(1), RunE: func(_ *cobra.Command, args []string) error {
+			return a.setActive(args[0], on)
 		}}
 	}
 
@@ -88,7 +84,7 @@ func (a *App) proxiesCmd() *cobra.Command {
 		&cobra.Command{Use: "list", Short: "list available proxies", Args: cobra.NoArgs, RunE: func(_ *cobra.Command, _ []string) error {
 			return a.proxyList()
 		}},
-		use("allow", true), use("disallow", false),
+		activation("activate", true), activation("deactivate", false),
 		parent("env", "manage proxy environment variables", envLs, envSet, envUnset),
 		&cobra.Command{Use: "refresh [PROXY...]", Short: "refresh credentials for all proxies", Args: cobra.ArbitraryArgs, RunE: func(_ *cobra.Command, args []string) error {
 			if a.Core == nil {
@@ -141,7 +137,7 @@ func (a *App) proxyList() error {
 	}
 	a.profileTable([]render.Column{
 		{Title: "NAME"}, {Title: "COMMAND"},
-		{Title: "IN USE", Style: func(c string) lipgloss.Style {
+		{Title: "ACTIVE", Style: func(c string) lipgloss.Style {
 			if c == "yes" {
 				return theme.OK
 			}
@@ -159,17 +155,17 @@ func (a *App) proxyList() error {
 	return nil
 }
 
-// setUse adds or removes a proxy from the selected profile's active list.
-func (a *App) setUse(name string, on bool) error {
+// setActive adds or removes a proxy from the selected profile's active list.
+func (a *App) setActive(name string, on bool) error {
 	if a.Core == nil {
 		return errNoCore
 	}
-	if err := a.Core.UseProxy(name, on); err != nil {
+	if err := a.Core.SetProxyActive(name, on); err != nil {
 		return err
 	}
-	verb := "stopped using"
+	verb := "deactivated"
 	if on {
-		verb = "using"
+		verb = "activated"
 	}
 	a.out().Done(verb, name, "")
 	return nil

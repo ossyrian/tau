@@ -44,7 +44,7 @@ type proxiesSection struct {
 func newProxies(api API) section {
 	p := &proxiesSection{
 		api: api, vars: newVarEditor(),
-		m: newMaster(true, "PROFILE", "NAME", "COMMAND", "IN USE", "SEES AGENT FILES", "PROGRAM PATH"),
+		m: newMaster(true, "PROFILE", "NAME", "COMMAND", "ACTIVE", "SEES AGENT FILES", "PROGRAM PATH"),
 	}
 	p.vars.set = func(key, value string) tea.Cmd {
 		name := p.open
@@ -200,7 +200,7 @@ func (p *proxiesSection) browse(msg tea.KeyPressMsg) tea.Cmd {
 		if !on {
 			verb = "no longer using " + name
 		}
-		return run(verb, func() (string, error) { return verb, p.api.UseProxy(name, on) })
+		return run(verb, func() (string, error) { return verb, p.api.SetProxyActive(name, on) })
 	case "enter":
 		if !ok {
 			return nil

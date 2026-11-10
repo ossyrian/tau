@@ -49,7 +49,7 @@ Run `tau -h` for the other commands:
 | `skills` | choose which host skills the agent loads |
 | `workspace` | add a project as a copy, or `--live` to mount the real directory |
 | `profile` | create profiles and set their workspace mode |
-| `proxy` | list, allow, disallow, refresh and reload proxies; set their variables |
+| `proxy` | list, activate, deactivate, refresh and reload proxies; set their variables |
 | `env` | set the profile's environment variables |
 
 `tau workspaces cd NAME` and `tau workspaces add` print the host path, so

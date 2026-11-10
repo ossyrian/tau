@@ -50,7 +50,7 @@ type (
 	// ProxyStore holds proxy definitions and their variables.
 	ProxyStore interface {
 		Proxies() (config.Proxies, error)
-		Use(name string, on bool) error
+		SetActive(name string, on bool) error
 		Vars(proxy string) ([]proxy.Var, error)
 		SetVar(proxy, key, value string) error
 		UnsetVar(proxy, key string) (bool, error)
@@ -371,12 +371,12 @@ func (c *Core) Proxies() (config.Proxies, error) {
 	return c.Proxy.Proxies()
 }
 
-// UseProxy lets this profile call a proxy (on) or stops it (off).
-func (c *Core) UseProxy(name string, on bool) error {
+// SetProxyActive lets this profile call a proxy (on) or stops it (off).
+func (c *Core) SetProxyActive(name string, on bool) error {
 	if c.Proxy == nil {
 		return errNoProxies
 	}
-	return c.Proxy.Use(name, on)
+	return c.Proxy.SetActive(name, on)
 }
 
 func (c *Core) ProxyVars(name string) ([]proxy.Var, error) {
@@ -409,7 +409,7 @@ func (c *Core) ReloadProxies() error {
 }
 
 // RefreshProxies mints fresh credentials for the named proxies and sends them
-// to those servers only. With no names it refreshes every proxy in use.
+// to those servers only. With no names it refreshes every active proxy.
 func (c *Core) RefreshProxies(names []string) error {
 	if c.Proxy == nil {
 		return errNoProxies

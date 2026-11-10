@@ -40,7 +40,7 @@ type API interface {
 	UnsetEnv(key string) (bool, error)
 
 	Proxies() (config.Proxies, error)
-	UseProxy(name string, on bool) error
+	SetProxyActive(name string, on bool) error
 	ProxyVars(name string) ([]proxy.Var, error)
 	SetProxyVar(name, key, value string) error
 	UnsetProxyVar(name, key string) (bool, error)

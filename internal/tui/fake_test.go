@@ -86,11 +86,11 @@ func (f *fakeAPI) SetEnv(k, v string) error        { return f.rec("setenv:" + k 
 func (f *fakeAPI) UnsetEnv(k string) (bool, error) { return true, f.rec("unsetenv:" + k) }
 
 func (f *fakeAPI) Proxies() (config.Proxies, error) { return f.proxies, f.proxyError }
-func (f *fakeAPI) UseProxy(n string, on bool) error {
+func (f *fakeAPI) SetProxyActive(n string, on bool) error {
 	if f.proxyError != nil {
 		return f.proxyError
 	}
-	f.rec(fmt.Sprintf("useproxy:%s=%v", n, on))
+	f.rec(fmt.Sprintf("setproxyactive:%s=%v", n, on))
 	var act []string
 	for _, a := range f.proxies.Active {
 		if a != n {

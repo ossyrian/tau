@@ -57,14 +57,14 @@ func TestAnotherProfileInheritsDefinitionsButKeepsItsOwnActiveList(t *testing.T)
 
 func TestUseAddsAndRemovesAndReloads(t *testing.T) {
 	s, r, _, _ := newStore(t, storeDefs, "")
-	if err := s.Use("gh", true); err != nil {
+	if err := s.SetActive("gh", true); err != nil {
 		t.Fatal(err)
 	}
 	p, _ := s.Proxies()
 	if !reflect.DeepEqual(p.Active, []string{"aws", "gh"}) || r.n != 1 {
 		t.Errorf("active %v reloads %d", p.Active, r.n)
 	}
-	if err := s.Use("aws", false); err != nil {
+	if err := s.SetActive("aws", false); err != nil {
 		t.Fatal(err)
 	}
 	if p, _ = s.Proxies(); !reflect.DeepEqual(p.Active, []string{"gh"}) || r.n != 2 {
@@ -72,7 +72,7 @@ func TestUseAddsAndRemovesAndReloads(t *testing.T) {
 	}
 }
 
-func TestUseRefusesUndefinedRepeatedAndAbsent(t *testing.T) {
+func TestSetActiveRefusesUndefinedRepeatedAndAbsent(t *testing.T) {
 	s, r, _, _ := newStore(t, storeDefs, "")
 	for name, tc := range map[string]struct {
 		proxy string
@@ -81,9 +81,9 @@ func TestUseRefusesUndefinedRepeatedAndAbsent(t *testing.T) {
 	}{
 		"undefined": {"ghost", true, "ghost"},
 		"repeat":    {"aws", true, "already"},
-		"absent":    {"gh", false, "not in use"},
+		"absent":    {"gh", false, "not active"},
 	} {
-		if err := s.Use(tc.proxy, tc.on); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if err := s.SetActive(tc.proxy, tc.on); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v", name, err)
 		}
 	}
@@ -133,7 +133,7 @@ func TestUnsetVarReportsWhetherItWasThere(t *testing.T) {
 func TestStoreWithoutServersStillSaves(t *testing.T) {
 	s, _, _, _ := newStore(t, storeDefs, "")
 	s.Servers = nil
-	if err := s.Use("gh", true); err != nil {
+	if err := s.SetActive("gh", true); err != nil {
 		t.Errorf("got %v", err)
 	}
 	var _ = config.Proxies{}
@@ -168,7 +168,7 @@ func TestRefreshWithoutServersIsAnError(t *testing.T) {
 func TestUsingAProxyWhoseAgentCommandClashesIsRejectedAndNothingIsSaved(t *testing.T) {
 	defs := "proxies:\n  defs:\n    a1: {system_binary: /bin/a, agent_command: aws}\n    a2: {system_binary: /bin/b, agent_command: aws}\n  active: [a1]\n"
 	s, r, _, _ := newStore(t, defs, "")
-	err := s.Use("a2", true)
+	err := s.SetActive("a2", true)
 	if err == nil || !strings.Contains(err.Error(), "agent_command") {
 		t.Fatalf("got %v", err)
 	}

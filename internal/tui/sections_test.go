@@ -236,7 +236,7 @@ func TestProxiesShowTheDefinitionAndToggleUse(t *testing.T) {
 		t.Errorf("definition missing %v:\n%s", miss, screen(m))
 	}
 	send(t, m, "space")
-	if !hasCall(f, "useproxy:aws=false") {
+	if !hasCall(f, "setproxyactive:aws=false") {
 		t.Errorf("calls %v", f.did())
 	}
 }

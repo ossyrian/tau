@@ -87,7 +87,7 @@ func TestProgramPathIsAbsoluteForSystemAndPackagedBinaries(t *testing.T) {
 
 func TestProxyUseAndUnuseChangeTheProfilesList(t *testing.T) {
 	h, f := proxyHarness(t)
-	if code := h.app.Run([]string{"proxies", "allow", "gh"}); code != 0 {
+	if code := h.app.Run([]string{"proxies", "activate", "gh"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	data, _ := os.ReadFile(filepath.Join(h.home, "config.yaml"))
@@ -97,7 +97,7 @@ func TestProxyUseAndUnuseChangeTheProfilesList(t *testing.T) {
 	if f.reloads != 1 {
 		t.Errorf("reloads %d: a change must reach the running servers", f.reloads)
 	}
-	if code := h.app.Run([]string{"proxies", "disallow", "aws"}); code != 0 {
+	if code := h.app.Run([]string{"proxies", "deactivate", "aws"}); code != 0 {
 		t.Fatalf("exit %d: %s", code, h.err)
 	}
 	h.out.Reset()
@@ -108,13 +108,13 @@ func TestProxyUseAndUnuseChangeTheProfilesList(t *testing.T) {
 
 func TestProxyUseRefusesAnUndefinedProxyAndRepeats(t *testing.T) {
 	h, _ := proxyHarness(t)
-	if code := h.app.Run([]string{"proxies", "allow", "ghost"}); code != 1 || !strings.Contains(h.err.String(), "ghost") {
+	if code := h.app.Run([]string{"proxies", "activate", "ghost"}); code != 1 || !strings.Contains(h.err.String(), "ghost") {
 		t.Errorf("exit %d err %q", code, h.err)
 	}
-	if code := h.app.Run([]string{"proxies", "allow", "aws"}); code != 1 || !strings.Contains(h.err.String(), "already") {
+	if code := h.app.Run([]string{"proxies", "activate", "aws"}); code != 1 || !strings.Contains(h.err.String(), "already") {
 		t.Errorf("repeat: exit %d err %q", code, h.err)
 	}
-	if code := h.app.Run([]string{"proxies", "disallow", "gh"}); code != 1 || !strings.Contains(h.err.String(), "not in use") {
+	if code := h.app.Run([]string{"proxies", "deactivate", "gh"}); code != 1 || !strings.Contains(h.err.String(), "not active") {
 		t.Errorf("unuse: exit %d err %q", code, h.err)
 	}
 }
