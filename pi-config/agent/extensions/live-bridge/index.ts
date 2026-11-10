@@ -11,8 +11,7 @@
  * idle, it injects a user message telling the agent to poll. Events are never
  * consumed here; the agent still handles them through the normal poll loop.
  *
- * Also provides `live_stop` / `/live-stop` to close every running live session
- * (same as the host's `tau live stop`).
+ * Also provides `live_stop` / `/live-stop` to close every running live session.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";

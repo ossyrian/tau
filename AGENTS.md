@@ -249,15 +249,9 @@ Skills can include scripts in a `scripts/` subdirectory, documented in `SKILL.md
 Requires the [impeccable](https://impeccable.style) skill activated in `config.yaml`; the
 `live-bridge` extension is a no-op without it. `impeccable live` runs a helper in the container that the user's browser talks to
 (ports in `PI_PORTS`). The bundled `live-bridge` extension wakes the agent when a
-browser event is queued with no poll running. To close every live session:
-
-```bash
-tau live status   # helpers, connected browsers, queued events
-tau live stop     # stop all helpers, strip injected live.js, kill stray polls
-```
-
-Inside pi: the `live_stop` tool (so you can tell the agent "close the debug
-sessions") or the `/live-stop` command. See the `tau-live-debug` skill.
+browser event is queued with no poll running. To close every live session, use the
+`live_stop` tool (so you can tell the agent "close the debug sessions") or the
+`/live-stop` command inside pi. See the `tau-live-debug` skill.
 
 ## Talking to Other Sessions
 

@@ -30,7 +30,7 @@ Everything listed here ships with the tau repo and is present in every tau insta
 | `subagent-sessions/` | Spawn and message other pi sessions (`subagent_list`, `subagent_send`, …) |
 | `index-awareness.ts` | Seeds an `INDEX.md` stub into `~/scripts/` and `/workspace/` and injects a pointer to each; the agent reads/maintains them (see `index-maintenance`) |
 | `glossary-awareness.ts` | Injects `~/.pi/agent/glossary.md` in full into the system prompt |
-| `live-bridge/` | (no-op unless the impeccable skill is mounted) Wakes the agent when an impeccable live-mode browser event is queued with no poll running; `live_stop` / `/live-stop` / `/live-status` (and `tau live stop` on the host) close every live debug session |
+| `live-bridge/` | (no-op unless the impeccable skill is mounted) Wakes the agent when an impeccable live-mode browser event is queued with no poll running; `live_stop` / `/live-stop` / `/live-status` close every live debug session |
 | `todos.ts` | `write_todos` planning tool |
 
 ## Bundled binaries (Docker image)

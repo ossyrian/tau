@@ -1,9 +1,7 @@
 /**
  * Process-level plumbing for impeccable's live mode (a browser overlay that
  * talks to a small "live-server" helper, which an agent drains with
- * `live-poll`). Shared by the extension (index.ts) and the host-facing CLI
- * (cli.ts, run via `tau live ...`). Erasable TS only: cli.ts runs under plain
- * `node` type stripping.
+ * `live-poll`). Used by the extension (index.ts).
  */
 
 import { execFile } from "node:child_process";

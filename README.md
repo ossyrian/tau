@@ -113,5 +113,5 @@ only. Branch protection is the real limit.
 ## Not ported yet
 
 These still exist only in the old bash script (`git show HEAD:tau`): `gitconfig`,
-`paste`, `annotate`, `live` and `migrate`. `AGENTS.md` has the detailed
+`paste` and `migrate`. `AGENTS.md` has the detailed
 reference.
