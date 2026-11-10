@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os/exec"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/ossyrian/tau/internal/container"
 	"github.com/ossyrian/tau/internal/core"
@@ -27,10 +29,10 @@ type (
 		prompt string
 		run    func() tea.Cmd
 	}
-	// attachMsg asks the root to hand the terminal to `docker <args>`.
-	attachMsg struct{ args []string }
-	// attachedMsg says the terminal came back.
-	attachedMsg struct{ err error }
+	// execMsg asks the root to hand the terminal to cmd until it exits.
+	execMsg struct{ cmd *exec.Cmd }
+	// execDoneMsg says the terminal came back.
+	execDoneMsg struct{ err error }
 	// reloadMsg tells the active section to re-read its data.
 	reloadMsg struct{}
 )

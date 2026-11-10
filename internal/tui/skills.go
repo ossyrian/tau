@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,7 +80,7 @@ func (s *skillsSection) Keys() []bkey.Binding {
 	if s.onPaths {
 		return append([]bkey.Binding{binding("a", "a", "add"), binding("e", "e", "rename"), binding("d", "d", "remove"), binding("p", "p", "skills")}, keys...)
 	}
-	return append([]bkey.Binding{binding("space", "space", "toggle"), binding("p", "p", "paths"), binding("r", "r", "restart")}, keys...)
+	return append([]bkey.Binding{binding("x", "x/space", "toggle"), binding("e", "e", "edit"), binding("p", "p", "paths"), binding("r", "r", "restart")}, keys...)
 }
 
 func (s *skillsSection) Enter() tea.Cmd {
@@ -167,14 +168,34 @@ func (s *skillsSection) browse(msg tea.KeyPressMsg) tea.Cmd {
 		return s.browsePaths(msg)
 	}
 	switch msg.String() {
-	case "space", "enter":
+	case "x", "space", "enter":
 		return s.toggle()
+	case "e":
+		return s.edit()
 	case "r":
 		return confirm("Restart the container to apply skill changes? Running sessions are lost.", func() tea.Cmd {
 			return run("restarting", func() (string, error) { return outcomeNotice(s.api.Restart()) })
 		})
 	}
 	return s.list.Update(msg)
+}
+
+// edit opens the selected skill's SKILL.md in $EDITOR.
+func (s *skillsSection) edit() tea.Cmd {
+	k, ok := s.selectedSkill()
+	if !ok {
+		return nil
+	}
+	if k.Path == "" {
+		return func() tea.Msg {
+			return doneMsg{err: errors.New(k.Name + " is not in any search path, so there is no file to edit")}
+		}
+	}
+	cmd, err := editorCmd(filepath.Join(k.Path, "SKILL.md"))
+	if err != nil {
+		return func() tea.Msg { return doneMsg{err: err} }
+	}
+	return func() tea.Msg { return execMsg{cmd} }
 }
 
 // toggle flips the selected skill. It only edits config.yaml, and pressing

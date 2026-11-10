@@ -3,6 +3,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -174,6 +175,62 @@ func TestSkillsSpaceTogglesAndPathsCanBeReachedWithP(t *testing.T) {
 	}
 }
 
+func TestSkillsXTogglesLikeSpace(t *testing.T) {
+	f := newFake(t)
+	f.skills = []skills.Skill{{Name: "voice", State: skills.Inactive}}
+	m := newRoot(t, f)
+	open(t, m, "skills")
+	send(t, m, "x")
+	if !hasCall(f, "activate:voice") {
+		t.Errorf("calls %v", f.did())
+	}
+}
+
+func TestSkillsEOpensSKILLmdInTheEditor(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "myeditor --wait")
+	dir := t.TempDir()
+	f := newFake(t)
+	f.skills = []skills.Skill{{Name: "voice", Path: dir, State: skills.Inactive}}
+	m := newRoot(t, f)
+	open(t, m, "skills")
+	_, cmd := m.Update(key("e"))
+	msg, ok := runCmd(cmd).(execMsg)
+	if !ok {
+		t.Fatalf("e did not hand the terminal over: %T", msg)
+	}
+	if want := []string{"myeditor", "--wait", dir + "/SKILL.md"}; !reflect.DeepEqual(msg.cmd.Args, want) {
+		t.Errorf("args %v want %v", msg.cmd.Args, want)
+	}
+}
+
+func TestSkillsEWithoutAPathSaysSo(t *testing.T) {
+	f := newFake(t)
+	f.skills = []skills.Skill{{Name: "gone", State: skills.Stale}}
+	m := newRoot(t, f)
+	open(t, m, "skills")
+	_, cmd := m.Update(key("e"))
+	if d, ok := runCmd(cmd).(doneMsg); !ok || d.err == nil {
+		t.Errorf("want an error notice, got %v", d)
+	}
+}
+
+func TestEditorPrefersVisualThenEditorThenVi(t *testing.T) {
+	t.Setenv("VISUAL", "code -w")
+	t.Setenv("EDITOR", "nano")
+	if c, _ := editorCmd("/f"); !reflect.DeepEqual(c.Args, []string{"code", "-w", "/f"}) {
+		t.Errorf("visual: %v", c.Args)
+	}
+	t.Setenv("VISUAL", "")
+	if c, _ := editorCmd("/f"); !reflect.DeepEqual(c.Args, []string{"nano", "/f"}) {
+		t.Errorf("editor: %v", c.Args)
+	}
+	t.Setenv("EDITOR", "")
+	if c, err := editorCmd("/f"); err == nil && c.Args[0] != "vi" {
+		t.Errorf("fallback: %v", c.Args)
+	}
+}
+
 func TestPackagesShowTheSelectedPackagesYAML(t *testing.T) {
 	f := newFake(t)
 	writeConfig(t, f, "packages:\n  pg: {apt: [postgresql]}\n", "")
@@ -235,9 +292,13 @@ func TestProxiesShowTheDefinitionAndToggleUse(t *testing.T) {
 	if miss := onScreen(m, "agent_command", "--debug"); len(miss) > 0 {
 		t.Errorf("definition missing %v:\n%s", miss, screen(m))
 	}
-	send(t, m, "space")
+	send(t, m, "t")
 	if !hasCall(f, "setproxyactive:aws=false") {
-		t.Errorf("calls %v", f.did())
+		t.Errorf("t: calls %v", f.did())
+	}
+	send(t, m, "space")
+	if !hasCall(f, "setproxyactive:aws=true") {
+		t.Errorf("space: calls %v", f.did())
 	}
 }
 

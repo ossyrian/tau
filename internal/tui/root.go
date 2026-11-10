@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os/exec"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -158,11 +157,10 @@ func (m Root) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prompt = &msg
 		return m, nil
 
-	case attachMsg:
-		cmd := exec.Command("docker", msg.args...)
-		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return attachedMsg{err} })
+	case execMsg:
+		return m, tea.ExecProcess(msg.cmd, func(err error) tea.Msg { return execDoneMsg{err} })
 
-	case attachedMsg:
+	case execDoneMsg:
 		m.notice, m.noticeErr = "", false
 		if msg.err != nil {
 			m.notice, m.noticeErr = msg.err.Error(), true

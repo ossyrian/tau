@@ -84,7 +84,7 @@ func (p *proxiesSection) Keys() []bkey.Binding {
 		return keys
 	}
 	return append([]bkey.Binding{
-		binding("space", "space", "use"), binding("enter", "enter", "variables"),
+		binding("t", "t/space", "toggle"), binding("enter", "enter", "variables"),
 		binding("r", "r", "reload"), binding("R", "R", "refresh"),
 	}, keys...)
 }
@@ -191,14 +191,14 @@ func (p *proxiesSection) browseVars(msg tea.KeyPressMsg) tea.Cmd {
 func (p *proxiesSection) browse(msg tea.KeyPressMsg) tea.Cmd {
 	name, ok := p.selected()
 	switch msg.String() {
-	case "space":
+	case "t", "space":
 		if !ok {
 			return nil
 		}
 		on := !contains(p.proxies.Active, name)
-		verb := "using " + name
+		verb := "activating " + name
 		if !on {
-			verb = "no longer using " + name
+			verb = "deactivating " + name
 		}
 		return run(verb, func() (string, error) { return verb, p.api.SetProxyActive(name, on) })
 	case "enter":
